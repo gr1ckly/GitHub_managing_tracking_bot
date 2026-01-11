@@ -48,7 +48,8 @@ func main() {
 		zap.L().Fatal("db connection failed", zap.Error(err))
 	}
 
-	repo := repgorm.NewGormGlobalRepo(db)
+	globalRepo := repgorm.NewGormSchedulerRepo(db)
+	tokenRepo := repgorm.NewGormTokenRepo(db)
 	ghClient := github.NewGithubClient()
 	writer, err := kafka.NewKafkaNotificationWriter(kafka.KafkaNotificationWriterConfig{
 		Addr:         cfg.kafkaBrokers,
@@ -63,7 +64,7 @@ func main() {
 	}
 	defer writer.Close()
 
-	checkFunc := tasks.GetCheckCommitsFunc(cfg.trackBatchSize, repo, ghClient, writer)
+	checkFunc := tasks.GetCheckCommitsFunc(cfg.trackBatchSize, globalRepo, tokenRepo, ghClient, writer)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

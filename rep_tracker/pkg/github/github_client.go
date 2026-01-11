@@ -2,8 +2,10 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
+	"rep_tracker/pkg/errs"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +31,9 @@ func (c *GithubClient) CheckRepo(ctx context.Context, token string, link string)
 	}
 	_, resp, err := currClient.Repositories.Get(ctx, owner, repoName)
 	if err != nil {
+		if isInvalidToken(err) {
+			return false, errs.ErrInvalidToken
+		}
 		if resp != nil && resp.StatusCode == 404 {
 			return false, nil
 		}
@@ -44,6 +49,11 @@ func (c *GithubClient) GetCommitsSince(ctx context.Context, token string, link s
 		return nil, err
 	}
 	commits, _, err := currClient.Repositories.ListCommits(ctx, owner, repoName, &github.CommitsListOptions{Since: lastTime})
+	if err != nil {
+		if isInvalidToken(err) {
+			return nil, errs.ErrInvalidToken
+		}
+	}
 	return commits, err
 }
 
@@ -89,4 +99,20 @@ func (c *GithubClient) getOwnerRepo(link string) (string, string, error) {
 		return "", "", fmt.Errorf("Empty gorm: %v", link)
 	}
 	return owner, repo, nil
+}
+
+func isInvalidToken(err error) bool {
+	var ghErr *github.ErrorResponse
+	if errors.As(err, &ghErr) && ghErr.Response != nil {
+		if ghErr.Response.StatusCode == 401 {
+			return true
+		}
+		if ghErr.Response.StatusCode == 403 {
+			msg := strings.ToLower(ghErr.Message)
+			if strings.Contains(msg, "bad credentials") || strings.Contains(msg, "invalid token") {
+				return true
+			}
+		}
+	}
+	return false
 }

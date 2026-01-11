@@ -13,15 +13,15 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-type GormGlobalRepo struct {
+type GormSchedulerRepo struct {
 	gorm *gormio.DB
 }
 
-func NewGormGlobalRepo(gorm *gormio.DB) *GormGlobalRepo {
-	return &GormGlobalRepo{gorm: gorm}
+func NewGormSchedulerRepo(gorm *gormio.DB) *GormSchedulerRepo {
+	return &GormSchedulerRepo{gorm: gorm}
 }
 
-func (r *GormGlobalRepo) SaveCommitsAndUpdateNotification(ctx context.Context, commits ...*github.RepositoryCommit) error {
+func (r *GormSchedulerRepo) SaveCommitsAndUpdateNotification(ctx context.Context, commits ...*github.RepositoryCommit) error {
 	if len(commits) == 0 {
 		return nil
 	}
@@ -110,7 +110,7 @@ func (r *GormGlobalRepo) SaveCommitsAndUpdateNotification(ctx context.Context, c
 	})
 }
 
-func (r *GormGlobalRepo) GetCountTrackingRepos(ctx context.Context) (int, error) {
+func (r *GormSchedulerRepo) GetCountTrackingRepos(ctx context.Context) (int, error) {
 	var count int64
 	err := r.gorm.WithContext(ctx).Transaction(func(tx *gormio.DB) error {
 		var err error
@@ -122,7 +122,7 @@ func (r *GormGlobalRepo) GetCountTrackingRepos(ctx context.Context) (int, error)
 	return int(count), err
 }
 
-func (r *GormGlobalRepo) GetTrackingRepos(ctx context.Context, offset int, limit int) ([]*Notification, error) {
+func (r *GormSchedulerRepo) GetTrackingRepos(ctx context.Context, offset int, limit int) ([]*Notification, error) {
 	var notifications []*Notification
 	err := r.gorm.WithContext(ctx).Transaction(func(tx *gormio.DB) error {
 		items, err := gormio.G[Notification](tx).
@@ -154,21 +154,22 @@ func (r *GormGlobalRepo) GetTrackingRepos(ctx context.Context, offset int, limit
 	return notifications, err
 }
 
-func (r *GormGlobalRepo) GetToken(ctx context.Context, userId int) (string, error) {
-	var token Token
-	err := r.gorm.WithContext(ctx).Transaction(func(tx *gormio.DB) error {
-		var err error
-		token, err = gormio.G[Token](tx).
-			Where("user_id = ?", userId).
-			Order("created_at DESC").
-			Limit(1).
-			First(ctx)
+func (r *GormSchedulerRepo) DisableTracking(ctx context.Context, notificationID int) error {
+	return r.gorm.WithContext(ctx).Transaction(func(tx *gormio.DB) error {
+		_, err := gormio.G[Notification](tx).
+			Where("id = ?", notificationID).
+			Update(ctx, "enabled", false)
 		return err
 	})
-	if err != nil {
-		return "", err
-	}
-	return token.Token, nil
+}
+
+func (r *GormSchedulerRepo) DisableTrackingForUser(ctx context.Context, userID int) error {
+	return r.gorm.WithContext(ctx).Transaction(func(tx *gormio.DB) error {
+		_, err := gormio.G[Notification](tx).
+			Where("user_id = ? AND enabled = ?", userID, true).
+			Update(ctx, "enabled", false)
+		return err
+	})
 }
 
 func findRepo(ctx context.Context, db *gormio.DB, owner string, name string) (*Repo, error) {
