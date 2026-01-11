@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/go-github/github"
 	gormio "gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type GormGlobalRepo struct {
@@ -31,7 +32,7 @@ func (r *GormGlobalRepo) SaveCommitsAndUpdateNotification(ctx context.Context, c
 	}
 
 	return r.gorm.WithContext(ctx).Transaction(func(tx *gormio.DB) error {
-		repo, err := findRepo(tx, repoOwner, repoName)
+		repo, err := findRepo(ctx, tx, repoOwner, repoName)
 		if err != nil {
 			return err
 		}
@@ -46,7 +47,10 @@ func (r *GormGlobalRepo) SaveCommitsAndUpdateNotification(ctx context.Context, c
 
 		existing := make([]Commit, 0, len(hashes))
 		if len(hashes) > 0 {
-			if err := tx.Where("repo_id = ? AND commit_hash IN ?", repo.ID, hashes).Find(&existing).Error; err != nil {
+			existing, err = gormio.G[Commit](tx).
+				Where("repo_id = ? AND commit_hash IN ?", repo.ID, hashes).
+				Find(ctx)
+			if err != nil {
 				return err
 			}
 		}
@@ -69,8 +73,10 @@ func (r *GormGlobalRepo) SaveCommitsAndUpdateNotification(ctx context.Context, c
 			commitTime := getCommitTime(c)
 			var authorID *int
 			if login := getAuthorLogin(c); login != "" {
-				var user User
-				if err := tx.Where("username = ?", login).First(&user).Error; err == nil {
+				user, err := gormio.G[User](tx).
+					Where("username = ?", login).
+					First(ctx)
+				if err == nil {
 					authorID = &user.ID
 				}
 			}
@@ -83,31 +89,35 @@ func (r *GormGlobalRepo) SaveCommitsAndUpdateNotification(ctx context.Context, c
 				Pushing:    ptrBool(false),
 				CreatedAt:  commitTime,
 			}
-			if err := tx.Create(&newCommit).Error; err != nil {
+			if err := gormio.G[Commit](tx).Create(ctx, &newCommit); err != nil {
 				return err
 			}
 			known[c.GetSHA()] = newCommit
 		}
 
-		var latest Commit
-		if err := tx.Where("repo_id = ?", repo.ID).
+		latest, err := gormio.G[Commit](tx).
+			Where("repo_id = ?", repo.ID).
 			Order("created_at DESC").
-			First(&latest).Error; err != nil {
+			First(ctx)
+		if err != nil {
 			return err
 		}
 
-		return tx.Model(&Notification{}).
+		_, err = gormio.G[Notification](tx).
 			Where("repo_id = ? AND enabled = ?", repo.ID, true).
-			Update("last_commit", latest.ID).Error
+			Update(ctx, "last_commit", latest.ID)
+		return err
 	})
 }
 
 func (r *GormGlobalRepo) GetCountTrackingRepos(ctx context.Context) (int, error) {
 	var count int64
 	err := r.gorm.WithContext(ctx).Transaction(func(tx *gormio.DB) error {
-		return tx.Model(&Notification{}).
+		var err error
+		count, err = gormio.G[Notification](tx).
 			Where("enabled = ?", true).
-			Count(&count).Error
+			Count(ctx, "id")
+		return err
 	})
 	return int(count), err
 }
@@ -115,14 +125,31 @@ func (r *GormGlobalRepo) GetCountTrackingRepos(ctx context.Context) (int, error)
 func (r *GormGlobalRepo) GetTrackingRepos(ctx context.Context, offset int, limit int) ([]*Notification, error) {
 	var notifications []*Notification
 	err := r.gorm.WithContext(ctx).Transaction(func(tx *gormio.DB) error {
-		return tx.Where("notifications.enabled = ?", true).
-			Joins("User").
-			Joins("Repo").
-			Preload("LastCommitEntity").
+		items, err := gormio.G[Notification](tx).
+			Where("notifications.enabled = ?", true).
+			Joins(clause.JoinTarget{Type: clause.LeftJoin, Table: "users"}, func(db gormio.JoinBuilder, joinTable clause.Table, curTable clause.Table) error {
+				db.Where("users.id = notifications.user_id")
+				return nil
+			}).
+			Joins(clause.JoinTarget{Type: clause.LeftJoin, Table: "repos"}, func(db gormio.JoinBuilder, joinTable clause.Table, curTable clause.Table) error {
+				db.Where("repos.id = notifications.repo_id")
+				return nil
+			}).
+			Preload("User", func(db gormio.PreloadBuilder) error { return nil }).
+			Preload("Repo", func(db gormio.PreloadBuilder) error { return nil }).
+			Preload("LastCommitEntity", func(db gormio.PreloadBuilder) error { return nil }).
 			Order("notifications.id").
 			Offset(offset).
 			Limit(limit).
-			Find(&notifications).Error
+			Find(ctx)
+		if err != nil {
+			return err
+		}
+		notifications = make([]*Notification, 0, len(items))
+		for i := range items {
+			notifications = append(notifications, &items[i])
+		}
+		return nil
 	})
 	return notifications, err
 }
@@ -130,10 +157,13 @@ func (r *GormGlobalRepo) GetTrackingRepos(ctx context.Context, offset int, limit
 func (r *GormGlobalRepo) GetToken(ctx context.Context, userId int) (string, error) {
 	var token Token
 	err := r.gorm.WithContext(ctx).Transaction(func(tx *gormio.DB) error {
-		return tx.Where("user_id = ?", userId).
+		var err error
+		token, err = gormio.G[Token](tx).
+			Where("user_id = ?", userId).
 			Order("created_at DESC").
 			Limit(1).
-			First(&token).Error
+			First(ctx)
+		return err
 	})
 	if err != nil {
 		return "", err
@@ -141,9 +171,10 @@ func (r *GormGlobalRepo) GetToken(ctx context.Context, userId int) (string, erro
 	return token.Token, nil
 }
 
-func findRepo(db *gormio.DB, owner string, name string) (*Repo, error) {
-	var repo Repo
-	err := db.Where("owner = ? AND name = ?", owner, name).First(&repo).Error
+func findRepo(ctx context.Context, db *gormio.DB, owner string, name string) (*Repo, error) {
+	repo, err := gormio.G[Repo](db).
+		Where("owner = ? AND name = ?", owner, name).
+		First(ctx)
 	if err == nil {
 		return &repo, nil
 	}
@@ -151,7 +182,9 @@ func findRepo(db *gormio.DB, owner string, name string) (*Repo, error) {
 		return nil, err
 	}
 	urlValue := fmt.Sprintf("https://github.com/%s/%s", owner, name)
-	err = db.Where("url = ? OR url = ?", urlValue, urlValue+".git").First(&repo).Error
+	repo, err = gormio.G[Repo](db).
+		Where("url = ? OR url = ?", urlValue, urlValue+".git").
+		First(ctx)
 	if err != nil {
 		return nil, err
 	}

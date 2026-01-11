@@ -6,5 +6,5 @@ import (
 )
 
 type NotificationWriter interface {
-	WriteNotification(ctx context.Context, dto dto.ChangingDTO) error
+	WriteNotification(ctx context.Context, chatId string, dto *dto.ChangingDTO) error
 }
