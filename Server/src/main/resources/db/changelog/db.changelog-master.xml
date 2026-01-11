@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.9.xsd">
+
+    <changeSet id="001-init-schema" author="Leonard">
+        <sqlFile path="./changes/001-init-schema.sql"
+                 relativeToChangelogFile="true"
+                 splitStatements="false"
+                 endDelimiter=";"/>
+        <rollback>
+            DROP TRIGGER IF EXISTS FILES_UPDATED_AT ON FILES;
+            DROP TRIGGER IF EXISTS UPDATE_BRANCH_LAST_COMMIT_TRIGGER ON COMMITS;
+            DROP FUNCTION IF EXISTS UPDATE_FILES_UPDATED_TIME;
+            DROP FUNCTION IF EXISTS UPDATE_BRANCH_LAST_COMMIT;
+            DROP TABLE IF EXISTS NOTIFICATIONS CASCADE;
+            DROP TABLE IF EXISTS EDITOR_SESSIONS CASCADE;
+            DROP TABLE IF EXISTS COMMIT_FILES CASCADE;
+            DROP TABLE IF EXISTS COMMITS CASCADE;
+            DROP TABLE IF EXISTS FILES CASCADE;
+            DROP TABLE IF EXISTS BRANCHES CASCADE;
+            DROP TABLE IF EXISTS USER_REPOS CASCADE;
+            DROP TABLE IF EXISTS TOKENS CASCADE;
+            DROP TABLE IF EXISTS REPOS CASCADE;
+            DROP TABLE IF EXISTS USERS CASCADE;
+            DROP TYPE IF EXISTS FILE_STATE;
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>
