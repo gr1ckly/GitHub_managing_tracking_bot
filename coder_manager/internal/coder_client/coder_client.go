@@ -25,5 +25,5 @@ type CoderClient interface {
 	CreateWorkspace(ctx context.Context, req CreateWorkspaceRequest) (string, error)
 	UploadFile(ctx context.Context, req UploadFileRequest) error
 	GetEditorURL(ctx context.Context, workspaceID string) (string, error)
-	DownloadFile(ctx context.Context, req DownloadFileRequest) ([]byte, error)
+	DownloadFile(ctx context.Context, req DownloadFileRequest) (io.ReadCloser, error)
 }

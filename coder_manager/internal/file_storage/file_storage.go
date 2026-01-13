@@ -8,7 +8,7 @@ import (
 type SaveFileRequest struct {
 	Key     string
 	Content io.Reader
-	Size    int64
+	Size    *int64
 }
 
 type FileStorage interface {

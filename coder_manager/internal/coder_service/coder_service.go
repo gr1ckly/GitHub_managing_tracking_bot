@@ -1,17 +1,16 @@
 package coder_service
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"coder_manager/internal/coder_client"
@@ -19,6 +18,10 @@ import (
 	"coder_manager/internal/notifier"
 	"coder_manager/internal/repo"
 	dao "coder_manager/pkg/dao"
+
+	"github.com/google/go-github/v62/github"
+	"go.uber.org/zap"
+	"golang.org/x/oauth2"
 )
 
 type CreateEditorSessionRequest struct {
@@ -36,6 +39,9 @@ type CreateEditorSessionResponse struct {
 }
 
 var ErrInvalidRequest = errors.New("invalid request")
+var ErrFileTooLarge = errors.New("file exceeds size limit")
+
+const maxGitHubFileSize = 1 << 30 // 1GB
 
 type Service struct {
 	repo             repo.CoderRepo
@@ -67,37 +73,49 @@ func (s *Service) CreateEditorSession(ctx context.Context, req CreateEditorSessi
 
 	owner, name, repoURL, err := parseRepo(req.Repo)
 	if err != nil {
+		zap.S().Errorw("parse repo failed", "repo", req.Repo, "error", err)
 		return nil, fmt.Errorf("%w: %s", ErrInvalidRequest, err.Error())
 	}
 
 	token, err := s.repo.GetUserToken(ctx, req.ChatID)
 	if err != nil {
+		zap.S().Errorw("get user token failed", "chat_id", req.ChatID, "error", err)
 		return nil, err
 	}
 
-	fileBytes, err := downloadGitHubFile(ctx, token, owner, name, req.Branch, req.Path)
-	if err != nil {
+	if err := ensureRepoAccess(ctx, token, owner, name); err != nil {
+		zap.S().Errorw("repo access denied", "owner", owner, "repo", name, "error", err)
 		return nil, err
 	}
+
+	fileReader, size, err := downloadGitHubFile(ctx, token, owner, name, req.Branch, req.Path)
+	if err != nil {
+		zap.S().Errorw("github download failed", "repo", req.Repo, "path", req.Path, "error", err)
+		return nil, err
+	}
+	defer fileReader.Close()
 
 	workspaceID, err := s.coderClient.CreateWorkspace(ctx, coder_client.CreateWorkspaceRequest{
 		Name: fmt.Sprintf("edit-%s-%s", owner, name),
 	})
 	if err != nil {
+		zap.S().Errorw("create workspace failed", "owner", owner, "repo", name, "error", err)
 		return nil, err
 	}
 
 	if err := s.coderClient.UploadFile(ctx, coder_client.UploadFileRequest{
 		WorkspaceID: workspaceID,
 		Path:        req.Path,
-		Content:     bytes.NewReader(fileBytes),
-		Size:        int64(len(fileBytes)),
+		Content:     fileReader,
+		Size:        sizeOrUnknown(size),
 	}); err != nil {
+		zap.S().Errorw("coder upload failed", "workspace_id", workspaceID, "path", req.Path, "error", err)
 		return nil, err
 	}
 
 	editorURL, err := s.coderClient.GetEditorURL(ctx, workspaceID)
 	if err != nil {
+		zap.S().Errorw("get editor url failed", "workspace_id", workspaceID, "error", err)
 		return nil, err
 	}
 
@@ -120,6 +138,7 @@ func (s *Service) CreateEditorSession(ctx context.Context, req CreateEditorSessi
 		OneTimeToken: oneTimeToken,
 	})
 	if err != nil {
+		zap.S().Errorw("create editor session failed", "repo", req.Repo, "path", req.Path, "error", err)
 		return nil, err
 	}
 
@@ -134,66 +153,154 @@ func (s *Service) CreateEditorSession(ctx context.Context, req CreateEditorSessi
 func (s *Service) HandleExpiredSessions(ctx context.Context, now time.Time, limit int) error {
 	sessions, err := s.repo.ListExpiredUnsavedSessions(ctx, now, limit)
 	if err != nil {
+		zap.S().Errorw("list expired sessions failed", "error", err)
 		return err
 	}
+	if len(sessions) == 0 {
+		return nil
+	}
+	const maxConcurrency = 4
+	sem := make(chan struct{}, maxConcurrency)
+	var wg sync.WaitGroup
 	for _, session := range sessions {
 		if session == nil || session.File.ID == 0 {
 			continue
 		}
-		content, err := s.coderClient.DownloadFile(ctx, coder_client.DownloadFileRequest{
-			WorkspaceID: session.WorkspaceID,
-			Path:        session.File.Path,
-		})
-		if err != nil {
-			continue
-		}
-		storageKey := buildStorageKey(session)
-		if err := s.storage.SaveFile(ctx, file_storage.SaveFileRequest{
-			Key:     storageKey,
-			Content: bytes.NewReader(content),
-			Size:    int64(len(content)),
-		}); err != nil {
-			continue
-		}
-		if err := s.repo.MarkSessionSaved(ctx, session.ID, now, storageKey); err != nil {
-			continue
-		}
-		userChatID := ""
-		if session.User != nil {
-			userChatID = session.User.ChatID
-		}
-		_ = s.notifier.NotifyFileEdited(ctx, notifier.FileEditNotification{
-			UserChatID: userChatID,
-			Repo:       session.File.Repo.URL,
-			Branch:     session.Branch,
-			Path:       session.File.Path,
-			S3Key:      storageKey,
-		})
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(session *dao.EditorSession) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			reader, err := s.coderClient.DownloadFile(ctx, coder_client.DownloadFileRequest{
+				WorkspaceID: session.WorkspaceID,
+				Path:        session.File.Path,
+			})
+			if err != nil {
+				zap.S().Errorw("coder download failed", "session_id", session.ID, "path", session.File.Path, "error", err)
+				return
+			}
+			defer reader.Close()
+			storageKey := buildStorageKey(session)
+			if err := s.storage.SaveFile(ctx, file_storage.SaveFileRequest{
+				Key:     storageKey,
+				Content: reader,
+				Size:    nil,
+			}); err != nil {
+				zap.S().Errorw("s3 save failed", "session_id", session.ID, "key", storageKey, "error", err)
+				return
+			}
+			if err := s.repo.MarkSessionSaved(ctx, session.ID, now, storageKey); err != nil {
+				zap.S().Errorw("mark session saved failed", "session_id", session.ID, "error", err)
+				return
+			}
+			userChatID := ""
+			if session.User != nil {
+				userChatID = session.User.ChatID
+			}
+			if err := s.notifier.NotifyFileEdited(ctx, notifier.FileEditNotification{
+				UserChatID: userChatID,
+				Repo:       session.File.Repo.URL,
+				Branch:     session.Branch,
+				Path:       session.File.Path,
+				S3Key:      storageKey,
+			}); err != nil {
+				zap.S().Errorw("notify failed", "session_id", session.ID, "error", err)
+			}
+		}(session)
 	}
+	wg.Wait()
 	return nil
 }
 
-func downloadGitHubFile(ctx context.Context, token string, owner string, repoName string, branch string, filePath string) ([]byte, error) {
+func downloadGitHubFile(ctx context.Context, token string, owner string, repoName string, branch string, filePath string) (io.ReadCloser, *int64, error) {
 	if strings.TrimSpace(branch) == "" {
 		branch = "main"
 	}
-	rawURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", owner, repoName, branch, strings.TrimLeft(filePath, "/"))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	client := newGitHubClient(ctx, token)
+	ref := branch
+	path := strings.TrimLeft(filePath, "/")
+	file, _, _, err := client.Repositories.GetContents(ctx, owner, repoName, path, &github.RepositoryContentGetOptions{Ref: ref})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if token != "" {
-		req.Header.Set("Authorization", "token "+token)
+	if file == nil {
+		return nil, nil, errors.New("path does not point to a file")
 	}
-	resp, err := http.DefaultClient.Do(req)
+	if file.GetType() == "dir" {
+		return nil, nil, errors.New("path points to a directory")
+	}
+	var sizePtr *int64
+	if size := file.GetSize(); size > 0 {
+		sizeValue := int64(size)
+		if sizeValue > maxGitHubFileSize {
+			return nil, nil, ErrFileTooLarge
+		}
+		sizePtr = &sizeValue
+	}
+	reader, _, err := client.Repositories.DownloadContents(ctx, owner, repoName, path, &github.RepositoryContentGetOptions{Ref: ref})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= http.StatusBadRequest {
-		return nil, fmt.Errorf("github download failed: %s", resp.Status)
+	if sizePtr == nil {
+		return limitReadCloser(reader, maxGitHubFileSize), nil, nil
 	}
-	return io.ReadAll(resp.Body)
+	return reader, sizePtr, nil
+}
+
+func newGitHubClient(ctx context.Context, token string) *github.Client {
+	if strings.TrimSpace(token) == "" {
+		return github.NewClient(nil)
+	}
+	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
+	return github.NewClient(oauth2.NewClient(ctx, ts))
+}
+
+func ensureRepoAccess(ctx context.Context, token string, owner string, repoName string) error {
+	client := newGitHubClient(ctx, token)
+	_, _, err := client.Repositories.Get(ctx, owner, repoName)
+	return err
+}
+
+func limitReadCloser(reader io.ReadCloser, limit int64) io.ReadCloser {
+	return &limitedReadCloser{
+		reader: reader,
+		limit:  limit,
+	}
+}
+
+type limitedReadCloser struct {
+	reader io.ReadCloser
+	limit  int64
+	read   int64
+}
+
+func (l *limitedReadCloser) Read(p []byte) (int, error) {
+	if l.read >= l.limit {
+		return 0, ErrFileTooLarge
+	}
+	if int64(len(p)) > l.limit-l.read {
+		p = p[:l.limit-l.read]
+	}
+	n, err := l.reader.Read(p)
+	l.read += int64(n)
+	if err == io.EOF {
+		return n, err
+	}
+	if l.read >= l.limit {
+		return n, ErrFileTooLarge
+	}
+	return n, err
+}
+
+func (l *limitedReadCloser) Close() error {
+	return l.reader.Close()
+}
+
+func sizeOrUnknown(size *int64) int64 {
+	if size == nil {
+		return -1
+	}
+	return *size
 }
 
 func parseRepo(input string) (string, string, string, error) {
