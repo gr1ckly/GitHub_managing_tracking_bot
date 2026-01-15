@@ -6,6 +6,8 @@ import lombok.Setter;
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import org.example.server.model.enums.FileState;
 
 import java.time.OffsetDateTime;
@@ -48,6 +50,7 @@ public class File {
     private Set<EditorSession> editorSessions = new LinkedHashSet<>();
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "state", columnDefinition = "file_state not null", nullable = false)
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "state", columnDefinition = "file_state", nullable = false)
     private FileState state;
 }
