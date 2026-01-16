@@ -39,6 +39,15 @@ type CreateEditorSessionResponse struct {
 	ExpiresAt  *time.Time
 }
 
+type SaveEditorSessionRequest struct {
+	SessionID int64
+}
+
+type SaveEditorSessionResponse struct {
+	StorageKey string
+	SavedAt    *time.Time
+}
+
 var ErrInvalidRequest = errors.New("invalid request")
 var ErrFileTooLarge = errors.New("file exceeds size limit")
 
@@ -187,6 +196,38 @@ func (s *Service) CreateEditorSession(ctx context.Context, req CreateEditorSessi
 	}, nil
 }
 
+func (s *Service) SaveEditorSession(ctx context.Context, req SaveEditorSessionRequest) (*SaveEditorSessionResponse, error) {
+	if req.SessionID <= 0 {
+		return nil, fmt.Errorf("%w: session_id must be positive", ErrInvalidRequest)
+	}
+	session, err := s.repo.GetSessionByID(ctx, req.SessionID)
+	if err != nil {
+		zap.S().Errorw("get session failed", "session_id", req.SessionID, "error", err)
+		return nil, err
+	}
+	if session == nil || session.File.ID == 0 {
+		return nil, repo.ErrSessionNotFound
+	}
+	if session.SavedAt != nil {
+		storageKey := storageKeyForSession(session)
+		return &SaveEditorSessionResponse{
+			StorageKey: storageKey,
+			SavedAt:    session.SavedAt,
+		}, nil
+	}
+	storageKey := storageKeyForSession(session)
+	savedAt := session.CreatedAt
+	go func(session *dao.EditorSession, savedAt time.Time) {
+		if _, err := s.saveSessionFile(context.Background(), session, savedAt, true); err != nil {
+			zap.S().Errorw("async save session failed", "session_id", session.ID, "error", err)
+		}
+	}(session, savedAt)
+	return &SaveEditorSessionResponse{
+		StorageKey: storageKey,
+		SavedAt:    &savedAt,
+	}, nil
+}
+
 func (s *Service) HandleExpiredSessions(ctx context.Context, now time.Time, limit int) error {
 	sessions, err := s.repo.ListExpiredUnsavedSessions(ctx, now, limit)
 	if err != nil {
@@ -208,43 +249,8 @@ func (s *Service) HandleExpiredSessions(ctx context.Context, now time.Time, limi
 		go func(session *dao.EditorSession) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			reader, err := s.coderClient.DownloadFile(ctx, coder_client.DownloadFileRequest{
-				WorkspaceID: session.WorkspaceID,
-				Path:        session.File.Path,
-			})
-			if err != nil {
-				zap.S().Errorw("coder download failed", "session_id", session.ID, "path", session.File.Path, "error", err)
-				return
-			}
-			defer reader.Close()
-			storageKey := buildStorageKey(session)
-			if session.File.StorageKey != nil && strings.TrimSpace(*session.File.StorageKey) != "" {
-				storageKey = *session.File.StorageKey
-			}
-			if err := s.storage.SaveFile(ctx, file_storage.SaveFileRequest{
-				Key:     storageKey,
-				Content: reader,
-				Size:    nil,
-			}); err != nil {
-				zap.S().Errorw("s3 save failed", "session_id", session.ID, "key", storageKey, "error", err)
-				return
-			}
-			if err := s.repo.MarkSessionSaved(ctx, session.ID, now, storageKey); err != nil {
-				zap.S().Errorw("mark session saved failed", "session_id", session.ID, "error", err)
-				return
-			}
-			userChatID := ""
-			if session.User != nil {
-				userChatID = session.User.ChatID
-			}
-			if err := s.notifier.NotifyFileEdited(ctx, notifier.FileEditNotification{
-				UserChatID: userChatID,
-				Repo:       session.File.Repo.URL,
-				Branch:     session.Branch,
-				Path:       session.File.Path,
-				S3Key:      storageKey,
-			}); err != nil {
-				zap.S().Errorw("notify failed", "session_id", session.ID, "error", err)
+			if _, err := s.saveSessionFile(ctx, session, now, false); err != nil {
+				zap.S().Errorw("save session failed", "session_id", session.ID, "error", err)
 			}
 		}(session)
 	}
@@ -384,6 +390,52 @@ func buildStorageKey(session *dao.EditorSession) string {
 		repoSegment = "unknown-repo"
 	}
 	return fmt.Sprintf("edited/%s/%d/%s", repoSegment, session.ID, strings.TrimLeft(session.File.Path, "/"))
+}
+
+func storageKeyForSession(session *dao.EditorSession) string {
+	if session.File.StorageKey != nil && strings.TrimSpace(*session.File.StorageKey) != "" {
+		return *session.File.StorageKey
+	}
+	return buildStorageKey(session)
+}
+
+func (s *Service) saveSessionFile(ctx context.Context, session *dao.EditorSession, savedAt time.Time, expireSession bool) (string, error) {
+	reader, err := s.coderClient.DownloadFile(ctx, coder_client.DownloadFileRequest{
+		WorkspaceID: session.WorkspaceID,
+		Path:        session.File.Path,
+	})
+	if err != nil {
+		zap.S().Errorw("coder download failed", "session_id", session.ID, "path", session.File.Path, "error", err)
+		return "", err
+	}
+	defer reader.Close()
+	storageKey := storageKeyForSession(session)
+	if err := s.storage.SaveFile(ctx, file_storage.SaveFileRequest{
+		Key:     storageKey,
+		Content: reader,
+		Size:    nil,
+	}); err != nil {
+		zap.S().Errorw("s3 save failed", "session_id", session.ID, "key", storageKey, "error", err)
+		return "", err
+	}
+	if err := s.repo.MarkSessionSaved(ctx, session.ID, savedAt, storageKey); err != nil {
+		zap.S().Errorw("mark session saved failed", "session_id", session.ID, "error", err)
+		return "", err
+	}
+	if expireSession {
+		expiresAt := time.Now()
+		if err := s.repo.MarkSessionExpired(ctx, session.ID, expiresAt); err != nil {
+			zap.S().Errorw("mark session expired failed", "session_id", session.ID, "error", err)
+		}
+	}
+	completedAt := time.Now()
+	if err := s.notifier.NotifyFileEdited(ctx, notifier.FileEditNotification{
+		FileID:  session.File.ID,
+		SavedAt: completedAt,
+	}); err != nil {
+		zap.S().Errorw("notify failed", "session_id", session.ID, "error", err)
+	}
+	return storageKey, nil
 }
 
 func normalizeS3Location(location string) (string, string, error) {

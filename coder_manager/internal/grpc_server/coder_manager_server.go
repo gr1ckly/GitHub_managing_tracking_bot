@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"coder_manager/internal/coder_service"
 	"coder_manager/internal/repo"
@@ -48,6 +50,28 @@ func (s *CoderManagerServer) CreateEditorSession(ctx context.Context, req *proto
 	}, nil
 }
 
+func (s *CoderManagerServer) SaveEditorSession(ctx context.Context, req *proto.SaveEditorSessionRequest) (*proto.SaveEditorSessionResponse, error) {
+	sessionID, err := parseStringID(req.GetSessionId())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	response, err := s.service.SaveEditorSession(ctx, coder_service.SaveEditorSessionRequest{
+		SessionID: sessionID,
+	})
+	if err != nil {
+		zap.S().Errorw("save editor session failed", "session_id", req.GetSessionId(), "error", err)
+		return nil, convertError(err)
+	}
+	var savedAt *timestamppb.Timestamp
+	if response.SavedAt != nil {
+		savedAt = timestamppb.New(*response.SavedAt)
+	}
+	return &proto.SaveEditorSessionResponse{
+		S3Key:   response.StorageKey,
+		SavedAt: savedAt,
+	}, nil
+}
+
 func convertError(err error) error {
 	if err == nil {
 		return nil
@@ -57,6 +81,9 @@ func convertError(err error) error {
 	}
 	if errors.Is(err, repo.ErrTokenNotFound) {
 		return status.Error(codes.PermissionDenied, err.Error())
+	}
+	if errors.Is(err, repo.ErrSessionNotFound) {
+		return status.Error(codes.NotFound, err.Error())
 	}
 	if errors.Is(err, coder_service.ErrInvalidRequest) {
 		return status.Error(codes.InvalidArgument, err.Error())
@@ -69,4 +96,16 @@ func stringID(value int64) string {
 		return ""
 	}
 	return fmt.Sprintf("%d", value)
+}
+
+func parseStringID(value string) (int64, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0, errors.New("session_id is required")
+	}
+	parsed, err := strconv.ParseInt(trimmed, 10, 64)
+	if err != nil || parsed <= 0 {
+		return 0, errors.New("session_id must be a positive integer")
+	}
+	return parsed, nil
 }

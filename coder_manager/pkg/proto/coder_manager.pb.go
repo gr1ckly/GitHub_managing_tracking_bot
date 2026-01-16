@@ -166,6 +166,102 @@ func (x *CreateEditorSessionResponse) GetExpiresAt() *timestamppb.Timestamp {
 	return nil
 }
 
+type SaveEditorSessionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SaveEditorSessionRequest) Reset() {
+	*x = SaveEditorSessionRequest{}
+	mi := &file_coder_manager_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SaveEditorSessionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SaveEditorSessionRequest) ProtoMessage() {}
+
+func (x *SaveEditorSessionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_coder_manager_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SaveEditorSessionRequest.ProtoReflect.Descriptor instead.
+func (*SaveEditorSessionRequest) Descriptor() ([]byte, []int) {
+	return file_coder_manager_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *SaveEditorSessionRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+type SaveEditorSessionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	S3Key         string                 `protobuf:"bytes,1,opt,name=s3_key,json=s3Key,proto3" json:"s3_key,omitempty"`
+	SavedAt       *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=saved_at,json=savedAt,proto3" json:"saved_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SaveEditorSessionResponse) Reset() {
+	*x = SaveEditorSessionResponse{}
+	mi := &file_coder_manager_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SaveEditorSessionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SaveEditorSessionResponse) ProtoMessage() {}
+
+func (x *SaveEditorSessionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_coder_manager_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SaveEditorSessionResponse.ProtoReflect.Descriptor instead.
+func (*SaveEditorSessionResponse) Descriptor() ([]byte, []int) {
+	return file_coder_manager_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *SaveEditorSessionResponse) GetS3Key() string {
+	if x != nil {
+		return x.S3Key
+	}
+	return ""
+}
+
+func (x *SaveEditorSessionResponse) GetSavedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.SavedAt
+	}
+	return nil
+}
+
 var File_coder_manager_proto protoreflect.FileDescriptor
 
 const file_coder_manager_proto_rawDesc = "" +
@@ -185,9 +281,16 @@ const file_coder_manager_proto_rawDesc = "" +
 	"\n" +
 	"session_id\x18\x02 \x01(\tR\tsessionId\x129\n" +
 	"\n" +
-	"expires_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt2\x83\x01\n" +
+	"expires_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"9\n" +
+	"\x18SaveEditorSessionRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\"i\n" +
+	"\x19SaveEditorSessionResponse\x12\x15\n" +
+	"\x06s3_key\x18\x01 \x01(\tR\x05s3Key\x125\n" +
+	"\bsaved_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\asavedAt2\xeb\x01\n" +
 	"\x13CoderManagerService\x12l\n" +
-	"\x13CreateEditorSession\x12).coder_manager.CreateEditorSessionRequest\x1a*.coder_manager.CreateEditorSessionResponseB\x1fZ\x1dcoder_manager/pkg/proto;protob\x06proto3"
+	"\x13CreateEditorSession\x12).coder_manager.CreateEditorSessionRequest\x1a*.coder_manager.CreateEditorSessionResponse\x12f\n" +
+	"\x11SaveEditorSession\x12'.coder_manager.SaveEditorSessionRequest\x1a(.coder_manager.SaveEditorSessionResponseB\x1fZ\x1dcoder_manager/pkg/proto;protob\x06proto3"
 
 var (
 	file_coder_manager_proto_rawDescOnce sync.Once
@@ -201,21 +304,26 @@ func file_coder_manager_proto_rawDescGZIP() []byte {
 	return file_coder_manager_proto_rawDescData
 }
 
-var file_coder_manager_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_coder_manager_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_coder_manager_proto_goTypes = []any{
 	(*CreateEditorSessionRequest)(nil),  // 0: coder_manager.CreateEditorSessionRequest
 	(*CreateEditorSessionResponse)(nil), // 1: coder_manager.CreateEditorSessionResponse
-	(*timestamppb.Timestamp)(nil),       // 2: google.protobuf.Timestamp
+	(*SaveEditorSessionRequest)(nil),    // 2: coder_manager.SaveEditorSessionRequest
+	(*SaveEditorSessionResponse)(nil),   // 3: coder_manager.SaveEditorSessionResponse
+	(*timestamppb.Timestamp)(nil),       // 4: google.protobuf.Timestamp
 }
 var file_coder_manager_proto_depIdxs = []int32{
-	2, // 0: coder_manager.CreateEditorSessionResponse.expires_at:type_name -> google.protobuf.Timestamp
-	0, // 1: coder_manager.CoderManagerService.CreateEditorSession:input_type -> coder_manager.CreateEditorSessionRequest
-	1, // 2: coder_manager.CoderManagerService.CreateEditorSession:output_type -> coder_manager.CreateEditorSessionResponse
-	2, // [2:3] is the sub-list for method output_type
-	1, // [1:2] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	4, // 0: coder_manager.CreateEditorSessionResponse.expires_at:type_name -> google.protobuf.Timestamp
+	4, // 1: coder_manager.SaveEditorSessionResponse.saved_at:type_name -> google.protobuf.Timestamp
+	0, // 2: coder_manager.CoderManagerService.CreateEditorSession:input_type -> coder_manager.CreateEditorSessionRequest
+	2, // 3: coder_manager.CoderManagerService.SaveEditorSession:input_type -> coder_manager.SaveEditorSessionRequest
+	1, // 4: coder_manager.CoderManagerService.CreateEditorSession:output_type -> coder_manager.CreateEditorSessionResponse
+	3, // 5: coder_manager.CoderManagerService.SaveEditorSession:output_type -> coder_manager.SaveEditorSessionResponse
+	4, // [4:6] is the sub-list for method output_type
+	2, // [2:4] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_coder_manager_proto_init() }
@@ -229,7 +337,7 @@ func file_coder_manager_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_coder_manager_proto_rawDesc), len(file_coder_manager_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

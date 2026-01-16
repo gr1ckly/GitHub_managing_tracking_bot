@@ -132,10 +132,27 @@ func (r *GormRepo) GetSessionByToken(ctx context.Context, token string) (*dao.Ed
 	return &session, nil
 }
 
+func (r *GormRepo) GetSessionByID(ctx context.Context, sessionID int64) (*dao.EditorSession, error) {
+	var session dao.EditorSession
+	if err := r.db.WithContext(ctx).Preload("File").Preload("File.Repo").Preload("User").Where("id = ?", sessionID).First(&session).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, internalrepo.ErrSessionNotFound
+		}
+		return nil, err
+	}
+	return &session, nil
+}
+
 func (r *GormRepo) MarkSessionConsumed(ctx context.Context, sessionID int64, consumedAt time.Time) error {
 	return r.db.WithContext(ctx).Model(&dao.EditorSession{}).
 		Where("id = ? AND consumed_at IS NULL", sessionID).
 		Update("consumed_at", consumedAt).Error
+}
+
+func (r *GormRepo) MarkSessionExpired(ctx context.Context, sessionID int64, expiresAt time.Time) error {
+	return r.db.WithContext(ctx).Model(&dao.EditorSession{}).
+		Where("id = ?", sessionID).
+		Update("expires_at", expiresAt).Error
 }
 
 func (r *GormRepo) ListExpiredUnsavedSessions(ctx context.Context, now time.Time, limit int) ([]*dao.EditorSession, error) {

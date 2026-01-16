@@ -32,7 +32,9 @@ type CoderRepo interface {
 	GetUserToken(ctx context.Context, chatID string) (string, error)
 	CreateEditorSession(ctx context.Context, params CreateSessionParams) (*dao.EditorSession, error)
 	GetSessionByToken(ctx context.Context, token string) (*dao.EditorSession, error)
+	GetSessionByID(ctx context.Context, sessionID int64) (*dao.EditorSession, error)
 	MarkSessionConsumed(ctx context.Context, sessionID int64, consumedAt time.Time) error
+	MarkSessionExpired(ctx context.Context, sessionID int64, expiresAt time.Time) error
 	ListExpiredUnsavedSessions(ctx context.Context, now time.Time, limit int) ([]*dao.EditorSession, error)
 	MarkSessionSaved(ctx context.Context, sessionID int64, savedAt time.Time, storageKey string) error
 }

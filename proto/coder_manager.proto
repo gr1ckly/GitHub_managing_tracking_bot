@@ -21,6 +21,16 @@ message CreateEditorSessionResponse {
   google.protobuf.Timestamp expires_at = 3;
 }
 
+message SaveEditorSessionRequest {
+  string session_id = 1;
+}
+
+message SaveEditorSessionResponse {
+  string s3_key = 1;
+  google.protobuf.Timestamp saved_at = 2;
+}
+
 service CoderManagerService {
   rpc CreateEditorSession(CreateEditorSessionRequest) returns (CreateEditorSessionResponse);
+  rpc SaveEditorSession(SaveEditorSessionRequest) returns (SaveEditorSessionResponse);
 }

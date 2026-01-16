@@ -46,7 +46,10 @@ func main() {
 	if err != nil {
 		zap.S().Fatalw("config load failed", "error", err)
 	}
-	coderAccessToken := os.Getenv("CODER_ACCESS_TOKEN")
+	coderAccessToken, err := requireEnv("CODER_ACCESS_TOKEN")
+	if err != nil {
+		zap.S().Fatalw("config load failed", "error", err)
+	}
 	grpcPort := envOrDefault("GRPC_PORT", "9090")
 	sessionSaverPeriod, err := durationFromEnv("SESSION_SAVER_PERIOD", 30*time.Second)
 	if err != nil {
@@ -64,6 +67,14 @@ func main() {
 	if err != nil {
 		zap.S().Fatalw("config load failed", "error", err)
 	}
+	notifyEndpoint := strings.TrimSpace(os.Getenv("FILE_SAVE_NOTIFY_URL"))
+	notifyTimeout, err := durationFromEnv("FILE_SAVE_NOTIFY_TIMEOUT", 5*time.Second)
+	if err != nil {
+		zap.S().Fatalw("config load failed", "error", err)
+	}
+	if notifyEndpoint == "" {
+		zap.S().Fatalw("config load failed", "error", "FILE_SAVE_NOTIFY_URL is required")
+	}
 
 	db, err := gorm.Open(postgres.Open(dbDSN), &gorm.Config{})
 	if err != nil {
@@ -78,7 +89,11 @@ func main() {
 	if err != nil {
 		zap.S().Fatalw("s3 init failed", "error", err)
 	}
-	notifyClient := notifier.NewStubNotifier()
+	webhookNotifier, err := notifier.NewWebhookNotifier(notifyEndpoint, notifyTimeout)
+	if err != nil {
+		zap.S().Fatalw("notifier init failed", "error", err)
+	}
+	notifyClient := notifier.Notifier(webhookNotifier)
 
 	coderClient, err := coder_client.NewSDKClient(coderCfg)
 	if err != nil {
@@ -158,15 +173,43 @@ func loadCoderConfig() (coder_client.Config, error) {
 		}
 		workspaceReadyTimeout = parsed
 	}
+	coderURL, err := requireEnv("CODER_URL")
+	if err != nil {
+		return coder_client.Config{}, err
+	}
+	coderTemplateID, err := requireEnv("CODER_TEMPLATE_ID")
+	if err != nil {
+		return coder_client.Config{}, err
+	}
+	coderTemplateVersionID, err := requireEnv("CODER_TEMPLATE_VERSION_ID")
+	if err != nil {
+		return coder_client.Config{}, err
+	}
+	coderTemplateVersionPresetID, err := requireEnv("CODER_TEMPLATE_VERSION_PRESET_ID")
+	if err != nil {
+		return coder_client.Config{}, err
+	}
+	coderUser, err := requireEnv("CODER_USER")
+	if err != nil {
+		return coder_client.Config{}, err
+	}
+	coderEditorSlug, err := requireEnv("CODER_EDITOR_APP_SLUG")
+	if err != nil {
+		return coder_client.Config{}, err
+	}
+	coderAgentName, err := requireEnv("CODER_AGENT_NAME")
+	if err != nil {
+		return coder_client.Config{}, err
+	}
 	return coder_client.Config{
-		URL:                     os.Getenv("CODER_URL"),
+		URL:                     coderURL,
 		AccessToken:             os.Getenv("CODER_ACCESS_TOKEN"),
-		TemplateID:              os.Getenv("CODER_TEMPLATE_ID"),
-		TemplateVersionID:       os.Getenv("CODER_TEMPLATE_VERSION_ID"),
-		TemplateVersionPresetID: os.Getenv("CODER_TEMPLATE_VERSION_PRESET_ID"),
-		User:                    os.Getenv("CODER_USER"),
-		EditorAppSlug:           os.Getenv("CODER_EDITOR_APP_SLUG"),
-		AgentName:               os.Getenv("CODER_AGENT_NAME"),
+		TemplateID:              coderTemplateID,
+		TemplateVersionID:       coderTemplateVersionID,
+		TemplateVersionPresetID: coderTemplateVersionPresetID,
+		User:                    coderUser,
+		EditorAppSlug:           coderEditorSlug,
+		AgentName:               coderAgentName,
 		WorkspaceReadyTimeout:   workspaceReadyTimeout,
 	}, nil
 }

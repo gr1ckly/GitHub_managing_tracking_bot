@@ -1,13 +1,13 @@
 package notifier
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type FileEditNotification struct {
-	UserChatID string
-	Repo       string
-	Branch     string
-	Path       string
-	S3Key      string
+	FileID  int
+	SavedAt time.Time
 }
 
 type Notifier interface {

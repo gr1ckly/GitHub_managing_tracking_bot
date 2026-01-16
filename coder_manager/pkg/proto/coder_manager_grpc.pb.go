@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	CoderManagerService_CreateEditorSession_FullMethodName = "/coder_manager.CoderManagerService/CreateEditorSession"
+	CoderManagerService_SaveEditorSession_FullMethodName   = "/coder_manager.CoderManagerService/SaveEditorSession"
 )
 
 // CoderManagerServiceClient is the client API for CoderManagerService service.
@@ -27,6 +28,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type CoderManagerServiceClient interface {
 	CreateEditorSession(ctx context.Context, in *CreateEditorSessionRequest, opts ...grpc.CallOption) (*CreateEditorSessionResponse, error)
+	SaveEditorSession(ctx context.Context, in *SaveEditorSessionRequest, opts ...grpc.CallOption) (*SaveEditorSessionResponse, error)
 }
 
 type coderManagerServiceClient struct {
@@ -47,11 +49,22 @@ func (c *coderManagerServiceClient) CreateEditorSession(ctx context.Context, in 
 	return out, nil
 }
 
+func (c *coderManagerServiceClient) SaveEditorSession(ctx context.Context, in *SaveEditorSessionRequest, opts ...grpc.CallOption) (*SaveEditorSessionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SaveEditorSessionResponse)
+	err := c.cc.Invoke(ctx, CoderManagerService_SaveEditorSession_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CoderManagerServiceServer is the server API for CoderManagerService service.
 // All implementations must embed UnimplementedCoderManagerServiceServer
 // for forward compatibility.
 type CoderManagerServiceServer interface {
 	CreateEditorSession(context.Context, *CreateEditorSessionRequest) (*CreateEditorSessionResponse, error)
+	SaveEditorSession(context.Context, *SaveEditorSessionRequest) (*SaveEditorSessionResponse, error)
 	mustEmbedUnimplementedCoderManagerServiceServer()
 }
 
@@ -64,6 +77,9 @@ type UnimplementedCoderManagerServiceServer struct{}
 
 func (UnimplementedCoderManagerServiceServer) CreateEditorSession(context.Context, *CreateEditorSessionRequest) (*CreateEditorSessionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateEditorSession not implemented")
+}
+func (UnimplementedCoderManagerServiceServer) SaveEditorSession(context.Context, *SaveEditorSessionRequest) (*SaveEditorSessionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SaveEditorSession not implemented")
 }
 func (UnimplementedCoderManagerServiceServer) mustEmbedUnimplementedCoderManagerServiceServer() {}
 func (UnimplementedCoderManagerServiceServer) testEmbeddedByValue()                             {}
@@ -104,6 +120,24 @@ func _CoderManagerService_CreateEditorSession_Handler(srv interface{}, ctx conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _CoderManagerService_SaveEditorSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SaveEditorSessionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoderManagerServiceServer).SaveEditorSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: CoderManagerService_SaveEditorSession_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoderManagerServiceServer).SaveEditorSession(ctx, req.(*SaveEditorSessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // CoderManagerService_ServiceDesc is the grpc.ServiceDesc for CoderManagerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -114,6 +148,10 @@ var CoderManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateEditorSession",
 			Handler:    _CoderManagerService_CreateEditorSession_Handler,
+		},
+		{
+			MethodName: "SaveEditorSession",
+			Handler:    _CoderManagerService_SaveEditorSession_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
