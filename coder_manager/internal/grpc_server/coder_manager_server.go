@@ -31,6 +31,7 @@ func (s *CoderManagerServer) CreateEditorSession(ctx context.Context, req *proto
 		Path:       req.GetPath(),
 		ChatID:     req.GetChatId(),
 		TTLSeconds: req.GetTtlSeconds(),
+		S3Key:      req.GetS3Key(),
 	})
 	if err != nil {
 		zap.S().Errorw("create editor session failed", "error", err)

@@ -12,6 +12,7 @@ message CreateEditorSessionRequest {
   string path = 3;
   string chat_id = 4;
   int64 ttl_seconds = 5;
+  string s3_key = 6;
 }
 
 message CreateEditorSessionResponse {

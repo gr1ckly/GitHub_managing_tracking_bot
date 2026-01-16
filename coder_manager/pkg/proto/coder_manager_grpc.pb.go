@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.0
 // - protoc             v6.33.2
-// source: proto/coder_manager.proto
+// source: coder_manager.proto
 
 package proto
 
@@ -117,5 +117,5 @@ var CoderManagerService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "proto/coder_manager.proto",
+	Metadata: "coder_manager.proto",
 }

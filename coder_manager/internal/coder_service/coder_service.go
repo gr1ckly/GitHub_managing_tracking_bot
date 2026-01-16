@@ -30,6 +30,7 @@ type CreateEditorSessionRequest struct {
 	Path       string
 	ChatID     string
 	TTLSeconds int64
+	S3Key      string
 }
 
 type CreateEditorSessionResponse struct {
@@ -64,39 +65,74 @@ func NewService(repo repo.CoderRepo, coderClient coder_client.CoderClient, stora
 }
 
 func (s *Service) CreateEditorSession(ctx context.Context, req CreateEditorSessionRequest) (*CreateEditorSessionResponse, error) {
-	if strings.TrimSpace(req.Repo) == "" || strings.TrimSpace(req.Path) == "" || strings.TrimSpace(req.ChatID) == "" {
-		return nil, fmt.Errorf("%w: repo, path and chat_id are required", ErrInvalidRequest)
+	if strings.TrimSpace(req.Path) == "" || strings.TrimSpace(req.ChatID) == "" {
+		return nil, fmt.Errorf("%w: path and chat_id are required", ErrInvalidRequest)
+	}
+	if strings.TrimSpace(req.Repo) == "" && strings.TrimSpace(req.S3Key) == "" {
+		return nil, fmt.Errorf("%w: repo or s3_key is required", ErrInvalidRequest)
 	}
 	if req.TTLSeconds <= 0 {
 		return nil, fmt.Errorf("%w: ttl_seconds must be positive", ErrInvalidRequest)
 	}
 
-	owner, name, repoURL, err := parseRepo(req.Repo)
-	if err != nil {
-		zap.S().Errorw("parse repo failed", "repo", req.Repo, "error", err)
-		return nil, fmt.Errorf("%w: %s", ErrInvalidRequest, err.Error())
-	}
+	var (
+		owner      string
+		name       string
+		repoURL    string
+		fileReader io.ReadCloser
+		size       *int64
+		storageKey string
+	)
+	if strings.TrimSpace(req.S3Key) != "" {
+		var err error
+		storageKey, repoURL, err = normalizeS3Location(req.S3Key)
+		if err != nil {
+			zap.S().Errorw("parse s3 location failed", "s3_key", req.S3Key, "error", err)
+			return nil, fmt.Errorf("%w: %s", ErrInvalidRequest, err.Error())
+		}
+		fileReader, size, err = s.storage.DownloadFile(ctx, file_storage.DownloadFileRequest{
+			Key: storageKey,
+		})
+		if err != nil {
+			zap.S().Errorw("s3 download failed", "key", storageKey, "error", err)
+			return nil, err
+		}
+	} else {
+		var err error
+		owner, name, repoURL, err = parseRepo(req.Repo)
+		if err != nil {
+			zap.S().Errorw("parse repo failed", "repo", req.Repo, "error", err)
+			return nil, fmt.Errorf("%w: %s", ErrInvalidRequest, err.Error())
+		}
 
-	token, err := s.repo.GetUserToken(ctx, req.ChatID)
-	if err != nil {
-		zap.S().Errorw("get user token failed", "chat_id", req.ChatID, "error", err)
-		return nil, err
-	}
+		token, err := s.repo.GetUserToken(ctx, req.ChatID)
+		if err != nil {
+			zap.S().Errorw("get user token failed", "chat_id", req.ChatID, "error", err)
+			return nil, err
+		}
 
-	if err := ensureRepoAccess(ctx, token, owner, name); err != nil {
-		zap.S().Errorw("repo access denied", "owner", owner, "repo", name, "error", err)
-		return nil, err
-	}
+		if err := ensureRepoAccess(ctx, token, owner, name); err != nil {
+			zap.S().Errorw("repo access denied", "owner", owner, "repo", name, "error", err)
+			return nil, err
+		}
 
-	fileReader, size, err := downloadGitHubFile(ctx, token, owner, name, req.Branch, req.Path)
-	if err != nil {
-		zap.S().Errorw("github download failed", "repo", req.Repo, "path", req.Path, "error", err)
-		return nil, err
+		fileReader, size, err = downloadGitHubFile(ctx, token, owner, name, req.Branch, req.Path)
+		if err != nil {
+			zap.S().Errorw("github download failed", "repo", req.Repo, "path", req.Path, "error", err)
+			return nil, err
+		}
 	}
 	defer fileReader.Close()
 
+	workspaceName := fmt.Sprintf("edit-%s-%s", owner, name)
+	if strings.Trim(workspaceName, "-") == "" {
+		workspaceName = "edit-session"
+		if storageKey != "" {
+			workspaceName = fmt.Sprintf("edit-s3-%s", path.Base(storageKey))
+		}
+	}
 	workspaceID, err := s.coderClient.CreateWorkspace(ctx, coder_client.CreateWorkspaceRequest{
-		Name: fmt.Sprintf("edit-%s-%s", owner, name),
+		Name: workspaceName,
 	})
 	if err != nil {
 		zap.S().Errorw("create workspace failed", "owner", owner, "repo", name, "error", err)
@@ -131,6 +167,7 @@ func (s *Service) CreateEditorSession(ctx context.Context, req CreateEditorSessi
 		RepoName:     name,
 		Branch:       req.Branch,
 		Path:         req.Path,
+		StorageKey:   storageKey,
 		UserChatID:   req.ChatID,
 		SessionURL:   editorURL,
 		WorkspaceID:  workspaceID,
@@ -181,6 +218,9 @@ func (s *Service) HandleExpiredSessions(ctx context.Context, now time.Time, limi
 			}
 			defer reader.Close()
 			storageKey := buildStorageKey(session)
+			if session.File.StorageKey != nil && strings.TrimSpace(*session.File.StorageKey) != "" {
+				storageKey = *session.File.StorageKey
+			}
 			if err := s.storage.SaveFile(ctx, file_storage.SaveFileRequest{
 				Key:     storageKey,
 				Content: reader,
@@ -344,4 +384,28 @@ func buildStorageKey(session *dao.EditorSession) string {
 		repoSegment = "unknown-repo"
 	}
 	return fmt.Sprintf("edited/%s/%d/%s", repoSegment, session.ID, strings.TrimLeft(session.File.Path, "/"))
+}
+
+func normalizeS3Location(location string) (string, string, error) {
+	trimmed := strings.TrimSpace(location)
+	if trimmed == "" {
+		return "", "", errors.New("s3 location is empty")
+	}
+	if strings.HasPrefix(trimmed, "s3://") {
+		parsed, err := url.Parse(trimmed)
+		if err != nil {
+			return "", "", err
+		}
+		bucket := strings.Trim(parsed.Host, "/")
+		key := strings.TrimLeft(parsed.Path, "/")
+		if bucket == "" || key == "" {
+			return "", "", errors.New("invalid s3 url")
+		}
+		return key, fmt.Sprintf("s3://%s/%s", bucket, key), nil
+	}
+	key := strings.TrimLeft(trimmed, "/")
+	if key == "" {
+		return "", "", errors.New("s3 key is empty")
+	}
+	return key, fmt.Sprintf("s3://%s", key), nil
 }

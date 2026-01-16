@@ -108,6 +108,34 @@ func (s *S3Storage) SaveFile(ctx context.Context, req internalfs.SaveFileRequest
 	return err
 }
 
+func (s *S3Storage) DownloadFile(ctx context.Context, req internalfs.DownloadFileRequest) (io.ReadCloser, *int64, error) {
+	if s.client == nil {
+		return nil, nil, errors.New("s3 client is nil")
+	}
+	key := strings.TrimSpace(req.Key)
+	if key == "" {
+		return nil, nil, errors.New("storage key is empty")
+	}
+	input := &s3.GetObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	}
+	output, err := s.client.GetObject(ctx, input)
+	if err != nil {
+		return nil, nil, err
+	}
+	size := output.ContentLength
+	if size != nil && *size > s.maxSize {
+		_ = output.Body.Close()
+		return nil, nil, errors.New("file exceeds size limit")
+	}
+	reader := io.ReadCloser(output.Body)
+	if size == nil || *size <= 0 {
+		reader = newLimitedReadCloser(output.Body, s.maxSize)
+	}
+	return reader, size, nil
+}
+
 type limitedReader struct {
 	reader io.Reader
 	limit  int64
@@ -131,4 +159,33 @@ func (l *limitedReader) Read(p []byte) (int, error) {
 		return n, errors.New("file exceeds size limit")
 	}
 	return n, err
+}
+
+type limitedReadCloser struct {
+	reader io.ReadCloser
+	limit  int64
+	read   int64
+}
+
+func newLimitedReadCloser(reader io.ReadCloser, limit int64) io.ReadCloser {
+	return &limitedReadCloser{reader: reader, limit: limit}
+}
+
+func (l *limitedReadCloser) Read(p []byte) (int, error) {
+	if l.read >= l.limit {
+		return 0, errors.New("file exceeds size limit")
+	}
+	if int64(len(p)) > l.limit-l.read {
+		p = p[:l.limit-l.read]
+	}
+	n, err := l.reader.Read(p)
+	l.read += int64(n)
+	if l.read >= l.limit && err == nil {
+		return n, errors.New("file exceeds size limit")
+	}
+	return n, err
+}
+
+func (l *limitedReadCloser) Close() error {
+	return l.reader.Close()
 }

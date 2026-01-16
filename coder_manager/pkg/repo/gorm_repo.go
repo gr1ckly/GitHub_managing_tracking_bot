@@ -80,15 +80,24 @@ func (r *GormRepo) createEditorSessionTx(ctx context.Context, tx *gorm.DB, param
 	if err := tx.WithContext(ctx).Where("repo_id = ? AND path = ?", repo.ID, params.Path).First(&file).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			file = dao.File{
-				RepoID: repo.ID,
-				State:  dao.FileStateModified,
-				Path:   params.Path,
+				RepoID:     repo.ID,
+				State:      dao.FileStateModified,
+				Path:       params.Path,
+				StorageKey: nullableString(params.StorageKey),
 			}
 			if err := tx.WithContext(ctx).Create(&file).Error; err != nil {
 				return nil, err
 			}
 		} else {
 			return nil, err
+		}
+	}
+	if storageKey := strings.TrimSpace(params.StorageKey); storageKey != "" {
+		if file.StorageKey == nil || *file.StorageKey != storageKey {
+			if err := tx.WithContext(ctx).Model(&file).Update("storage_key", storageKey).Error; err != nil {
+				return nil, err
+			}
+			file.StorageKey = &storageKey
 		}
 	}
 

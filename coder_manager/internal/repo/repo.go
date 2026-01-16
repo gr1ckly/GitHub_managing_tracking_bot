@@ -20,6 +20,7 @@ type CreateSessionParams struct {
 	RepoName     string
 	Branch       string
 	Path         string
+	StorageKey   string
 	UserChatID   string
 	SessionURL   string
 	WorkspaceID  string

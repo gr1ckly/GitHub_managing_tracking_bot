@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v6.33.2
-// source: proto/coder_manager.proto
+// source: coder_manager.proto
 
 package proto
 
@@ -29,13 +29,14 @@ type CreateEditorSessionRequest struct {
 	Path          string                 `protobuf:"bytes,3,opt,name=path,proto3" json:"path,omitempty"`
 	ChatId        string                 `protobuf:"bytes,4,opt,name=chat_id,json=chatId,proto3" json:"chat_id,omitempty"`
 	TtlSeconds    int64                  `protobuf:"varint,5,opt,name=ttl_seconds,json=ttlSeconds,proto3" json:"ttl_seconds,omitempty"`
+	S3Key         string                 `protobuf:"bytes,6,opt,name=s3_key,json=s3Key,proto3" json:"s3_key,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CreateEditorSessionRequest) Reset() {
 	*x = CreateEditorSessionRequest{}
-	mi := &file_proto_coder_manager_proto_msgTypes[0]
+	mi := &file_coder_manager_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -47,7 +48,7 @@ func (x *CreateEditorSessionRequest) String() string {
 func (*CreateEditorSessionRequest) ProtoMessage() {}
 
 func (x *CreateEditorSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_coder_manager_proto_msgTypes[0]
+	mi := &file_coder_manager_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -60,7 +61,7 @@ func (x *CreateEditorSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateEditorSessionRequest.ProtoReflect.Descriptor instead.
 func (*CreateEditorSessionRequest) Descriptor() ([]byte, []int) {
-	return file_proto_coder_manager_proto_rawDescGZIP(), []int{0}
+	return file_coder_manager_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *CreateEditorSessionRequest) GetRepo() string {
@@ -98,6 +99,13 @@ func (x *CreateEditorSessionRequest) GetTtlSeconds() int64 {
 	return 0
 }
 
+func (x *CreateEditorSessionRequest) GetS3Key() string {
+	if x != nil {
+		return x.S3Key
+	}
+	return ""
+}
+
 type CreateEditorSessionResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	OneTimeUrl    string                 `protobuf:"bytes,1,opt,name=one_time_url,json=oneTimeUrl,proto3" json:"one_time_url,omitempty"`
@@ -109,7 +117,7 @@ type CreateEditorSessionResponse struct {
 
 func (x *CreateEditorSessionResponse) Reset() {
 	*x = CreateEditorSessionResponse{}
-	mi := &file_proto_coder_manager_proto_msgTypes[1]
+	mi := &file_coder_manager_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -121,7 +129,7 @@ func (x *CreateEditorSessionResponse) String() string {
 func (*CreateEditorSessionResponse) ProtoMessage() {}
 
 func (x *CreateEditorSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_coder_manager_proto_msgTypes[1]
+	mi := &file_coder_manager_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -134,7 +142,7 @@ func (x *CreateEditorSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateEditorSessionResponse.ProtoReflect.Descriptor instead.
 func (*CreateEditorSessionResponse) Descriptor() ([]byte, []int) {
-	return file_proto_coder_manager_proto_rawDescGZIP(), []int{1}
+	return file_coder_manager_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *CreateEditorSessionResponse) GetOneTimeUrl() string {
@@ -158,18 +166,19 @@ func (x *CreateEditorSessionResponse) GetExpiresAt() *timestamppb.Timestamp {
 	return nil
 }
 
-var File_proto_coder_manager_proto protoreflect.FileDescriptor
+var File_coder_manager_proto protoreflect.FileDescriptor
 
-const file_proto_coder_manager_proto_rawDesc = "" +
+const file_coder_manager_proto_rawDesc = "" +
 	"\n" +
-	"\x19proto/coder_manager.proto\x12\rcoder_manager\x1a\x1fgoogle/protobuf/timestamp.proto\"\x96\x01\n" +
+	"\x13coder_manager.proto\x12\rcoder_manager\x1a\x1fgoogle/protobuf/timestamp.proto\"\xad\x01\n" +
 	"\x1aCreateEditorSessionRequest\x12\x12\n" +
 	"\x04repo\x18\x01 \x01(\tR\x04repo\x12\x16\n" +
 	"\x06branch\x18\x02 \x01(\tR\x06branch\x12\x12\n" +
 	"\x04path\x18\x03 \x01(\tR\x04path\x12\x17\n" +
 	"\achat_id\x18\x04 \x01(\tR\x06chatId\x12\x1f\n" +
 	"\vttl_seconds\x18\x05 \x01(\x03R\n" +
-	"ttlSeconds\"\x99\x01\n" +
+	"ttlSeconds\x12\x15\n" +
+	"\x06s3_key\x18\x06 \x01(\tR\x05s3Key\"\x99\x01\n" +
 	"\x1bCreateEditorSessionResponse\x12 \n" +
 	"\fone_time_url\x18\x01 \x01(\tR\n" +
 	"oneTimeUrl\x12\x1d\n" +
@@ -181,24 +190,24 @@ const file_proto_coder_manager_proto_rawDesc = "" +
 	"\x13CreateEditorSession\x12).coder_manager.CreateEditorSessionRequest\x1a*.coder_manager.CreateEditorSessionResponseB\x1fZ\x1dcoder_manager/pkg/proto;protob\x06proto3"
 
 var (
-	file_proto_coder_manager_proto_rawDescOnce sync.Once
-	file_proto_coder_manager_proto_rawDescData []byte
+	file_coder_manager_proto_rawDescOnce sync.Once
+	file_coder_manager_proto_rawDescData []byte
 )
 
-func file_proto_coder_manager_proto_rawDescGZIP() []byte {
-	file_proto_coder_manager_proto_rawDescOnce.Do(func() {
-		file_proto_coder_manager_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_coder_manager_proto_rawDesc), len(file_proto_coder_manager_proto_rawDesc)))
+func file_coder_manager_proto_rawDescGZIP() []byte {
+	file_coder_manager_proto_rawDescOnce.Do(func() {
+		file_coder_manager_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_coder_manager_proto_rawDesc), len(file_coder_manager_proto_rawDesc)))
 	})
-	return file_proto_coder_manager_proto_rawDescData
+	return file_coder_manager_proto_rawDescData
 }
 
-var file_proto_coder_manager_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
-var file_proto_coder_manager_proto_goTypes = []any{
+var file_coder_manager_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_coder_manager_proto_goTypes = []any{
 	(*CreateEditorSessionRequest)(nil),  // 0: coder_manager.CreateEditorSessionRequest
 	(*CreateEditorSessionResponse)(nil), // 1: coder_manager.CreateEditorSessionResponse
 	(*timestamppb.Timestamp)(nil),       // 2: google.protobuf.Timestamp
 }
-var file_proto_coder_manager_proto_depIdxs = []int32{
+var file_coder_manager_proto_depIdxs = []int32{
 	2, // 0: coder_manager.CreateEditorSessionResponse.expires_at:type_name -> google.protobuf.Timestamp
 	0, // 1: coder_manager.CoderManagerService.CreateEditorSession:input_type -> coder_manager.CreateEditorSessionRequest
 	1, // 2: coder_manager.CoderManagerService.CreateEditorSession:output_type -> coder_manager.CreateEditorSessionResponse
@@ -209,26 +218,26 @@ var file_proto_coder_manager_proto_depIdxs = []int32{
 	0, // [0:1] is the sub-list for field type_name
 }
 
-func init() { file_proto_coder_manager_proto_init() }
-func file_proto_coder_manager_proto_init() {
-	if File_proto_coder_manager_proto != nil {
+func init() { file_coder_manager_proto_init() }
+func file_coder_manager_proto_init() {
+	if File_coder_manager_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_coder_manager_proto_rawDesc), len(file_proto_coder_manager_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_coder_manager_proto_rawDesc), len(file_coder_manager_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_proto_coder_manager_proto_goTypes,
-		DependencyIndexes: file_proto_coder_manager_proto_depIdxs,
-		MessageInfos:      file_proto_coder_manager_proto_msgTypes,
+		GoTypes:           file_coder_manager_proto_goTypes,
+		DependencyIndexes: file_coder_manager_proto_depIdxs,
+		MessageInfos:      file_coder_manager_proto_msgTypes,
 	}.Build()
-	File_proto_coder_manager_proto = out.File
-	file_proto_coder_manager_proto_goTypes = nil
-	file_proto_coder_manager_proto_depIdxs = nil
+	File_coder_manager_proto = out.File
+	file_coder_manager_proto_goTypes = nil
+	file_coder_manager_proto_depIdxs = nil
 }
