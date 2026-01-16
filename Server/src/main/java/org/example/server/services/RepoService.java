@@ -1,12 +1,7 @@
 package org.example.server.services;
 
 import org.example.server.model.dto.*;
-import org.example.server.model.entity.File;
-import org.example.server.model.entity.Notification;
-import org.example.server.model.entity.Repo;
-import org.example.server.model.entity.User;
-import org.example.server.model.entity.UserRepo;
-import org.example.server.model.entity.UserRepoId;
+import org.example.server.model.entity.*;
 import org.example.server.model.enums.FileState;
 import org.example.server.repos.*;
 import org.slf4j.Logger;
@@ -35,6 +30,8 @@ public class RepoService {
     private final NotificationRepository notificationRepository;
     private final EditorSessionRepository editorSessionRepository;
     private final StorageService storageService;
+    private final TokensRepository tokensRepository;
+    private final GitHubClientImpl gitHubClient;
 
     public RepoService(UserRepository userRepository,
                        RepoRepository repoRepository,
@@ -42,7 +39,9 @@ public class RepoService {
                        FileRepository fileRepository,
                        NotificationRepository notificationRepository,
                        EditorSessionRepository editorSessionRepository,
-                       StorageService storageService) {
+                       StorageService storageService,
+                       TokensRepository tokensRepository,
+                       GitHubClientImpl gitHubClient) {
         this.userRepository = userRepository;
         this.repoRepository = repoRepository;
         this.userRepoRepository = userRepoRepository;
@@ -50,6 +49,8 @@ public class RepoService {
         this.notificationRepository = notificationRepository;
         this.editorSessionRepository = editorSessionRepository;
         this.storageService = storageService;
+        this.tokensRepository = tokensRepository;
+        this.gitHubClient = gitHubClient;
     }
 
     @Transactional
@@ -78,6 +79,9 @@ public class RepoService {
                 link.setAddedAt(OffsetDateTime.now());
                 userRepoRepository.save(link);
             }
+
+            // Синхронизируем дерево репозитория в БД
+            syncRepoTreeFromGitHub(user, repo);
         }catch(Exception e){
             log.warn(e.getLocalizedMessage());
         }
@@ -210,6 +214,103 @@ public class RepoService {
                 .map(File::getPath)
                 .sorted()
                 .collect(Collectors.joining("\n"));
+    }
+
+    @Transactional(readOnly = true)
+    public List<TreeEntryDto> listEntries(Long chatId, String parentPath) {
+        User user = requireUser(chatId);
+        Repo repo = requireUserRepo(user);
+        String normalized = parentPath == null ? "" : parentPath;
+        if (!normalized.isEmpty() && normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        final String prefix = normalized.isEmpty() ? "" : normalized + "/";
+        List<File> files = fileRepository.findByRepo(repo);
+        return files.stream()
+                .map(File::getPath)
+                .filter(p -> p.startsWith(prefix))
+                .map(p -> p.substring(prefix.length()))
+                .filter(p -> !p.isEmpty())
+                .map(p -> {
+                    int slash = p.indexOf('/');
+                    boolean dir = slash >= 0;
+                    String name = dir ? p.substring(0, slash) : p;
+                    String fullPath = dir ? prefix + name : prefix + name;
+                    return new TreeEntryDto(name, fullPath, dir);
+                })
+                .collect(Collectors.toMap(TreeEntryDto::path, t -> t, (a, b) -> a)) // remove duplicates
+                .values()
+                .stream()
+                .sorted((a, b) -> {
+                    if (a.directory() == b.directory()) {
+                        return a.name().compareTo(b.name());
+                    }
+                    return a.directory() ? -1 : 1;
+                })
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public String getFileContent(Long chatId, String path) {
+        FileDownload download = downloadFile(chatId, path);
+        return new String(download.bytes());
+    }
+
+    @Transactional
+    public FileDownload downloadFile(Long chatId, String path) {
+        User user = requireUser(chatId);
+        Repo repo = requireUserRepo(user);
+        String cleanPath = path.startsWith("/") ? path.substring(1) : path;
+        File file = fileRepository.findByRepoAndPath(repo, cleanPath)
+                .orElseThrow(() -> new IllegalArgumentException("Файл не найден"));
+
+        byte[] contentBytes;
+        if (file.getStorageKey() != null) {
+            try {
+                contentBytes = storageService.getObjectBytes(file.getStorageKey());
+            } catch (RuntimeException e) {
+                log.warn("Не удалось прочитать из хранилища {}, попробуем скачать из GitHub", file.getStorageKey());
+                contentBytes = downloadAndCacheFile(user, repo, cleanPath, file);
+            }
+        } else {
+            contentBytes = downloadAndCacheFile(user, repo, cleanPath, file);
+        }
+        String fileName = cleanPath.contains("/") ? cleanPath.substring(cleanPath.lastIndexOf('/') + 1) : cleanPath;
+        return new FileDownload(fileName, contentBytes);
+    }
+
+    private byte[] downloadAndCacheFile(User user, Repo repo, String path, File file) {
+        String token = tokensRepository.findByUser(user)
+                .map(Token::getToken)
+                .orElseThrow(() -> new IllegalStateException("Нет сохраненного токена пользователя"));
+        String branch = repo.getOwner() != null ? gitHubClient.resolveDefaultBranch(token, repo.getOwner(), repo.getName()) : "main";
+        byte[] bytes = gitHubClient.downloadFile(token, repo.getOwner(), repo.getName(), path, branch);
+        String objectKey = repo.getId() + "/" + path;
+        storageService.putObject(objectKey, bytes, "application/octet-stream");
+        file.setStorageKey(objectKey);
+        file.setUpdatedAt(OffsetDateTime.now());
+        fileRepository.save(file);
+        return bytes;
+    }
+
+    private void syncRepoTreeFromGitHub(User user, Repo repo) {
+        String token = tokensRepository.findByUser(user)
+                .map(Token::getToken)
+                .orElseThrow(() -> new IllegalStateException("Нет сохраненного токена пользователя"));
+        String branch = gitHubClient.resolveDefaultBranch(token, repo.getOwner(), repo.getName());
+        List<GitHubTreeItem> items = gitHubClient.fetchRepoTree(token, repo.getOwner(), repo.getName(), branch);
+        items.stream()
+                .filter(GitHubTreeItem::isFile)
+                .forEach(item -> {
+                    String path = item.path();
+                    File file = fileRepository.findByRepoAndPath(repo, path).orElseGet(File::new);
+                    file.setRepo(repo);
+                    file.setPath(path);
+                    file.setState(FileState.ADDED);
+                    file.setCreatedAt(Optional.ofNullable(file.getCreatedAt()).orElse(OffsetDateTime.now()));
+                    file.setUpdatedAt(OffsetDateTime.now());
+                    fileRepository.save(file);
+                });
     }
 
     @Transactional

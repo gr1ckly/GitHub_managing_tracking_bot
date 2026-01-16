@@ -3,9 +3,12 @@ package org.example.server.controllers;
 import org.example.server.model.dto.AddRepositoryRequest;
 import org.example.server.model.dto.PushRepositoryRequest;
 import org.example.server.model.dto.WatchRepositoryRequest;
+import org.example.server.model.dto.TreeEntryDto;
 import org.example.server.services.RepoService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/repos")
@@ -33,7 +36,8 @@ public class RepoController {
     }
 
     @GetMapping("/tree")
-    public ResponseEntity<String> tree(@RequestParam("chatId") Long chatId) {
-        return ResponseEntity.ok(repoService.repoTree(chatId));
+    public ResponseEntity<List<TreeEntryDto>> tree(@RequestParam("chatId") Long chatId,
+                                                   @RequestParam(value = "path", required = false) String path) {
+        return ResponseEntity.ok(repoService.listEntries(chatId, path));
     }
 }

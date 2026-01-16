@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.io.IOException;
 
 @Service
 public class StorageService implements InitializingBean {
@@ -56,6 +57,14 @@ public class StorageService implements InitializingBean {
                     .build());
         } catch (Exception e) {
             throw new IllegalStateException("Failed to fetch object " + objectKey, e);
+        }
+    }
+
+    public byte[] getObjectBytes(String objectKey) {
+        try (InputStream in = getObject(objectKey)) {
+            return in.readAllBytes();
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to read object bytes " + objectKey, e);
         }
     }
 

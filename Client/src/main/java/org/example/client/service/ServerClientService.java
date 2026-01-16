@@ -15,6 +15,9 @@ import org.springframework.web.client.RestTemplate;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.URI;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 @Service
 public class ServerClientService {
@@ -95,6 +98,29 @@ public class ServerClientService {
         URI uri = URI.create(properties.getBaseUrl() + "/api/repos/tree?chatId=" + chatId);
         ResponseEntity<String> response = restTemplate.getForEntity(uri, String.class);
         return response.getBody() == null ? "Дерево репозитория недоступно" : response.getBody();
+    }
+
+    public List<TreeEntryDto> fetchTreeEntries(Long chatId, String path) {
+        String url = properties.getBaseUrl() + "/api/repos/tree?chatId=" + chatId;
+        if (path != null && !path.isBlank()) {
+            url += "&path=" + path;
+        }
+        ResponseEntity<TreeEntryDto[]> resp = restTemplate.getForEntity(URI.create(url), TreeEntryDto[].class);
+        TreeEntryDto[] body = resp.getBody();
+        return body == null ? Collections.emptyList() : Arrays.asList(body);
+    }
+
+    public String fetchFileContent(Long chatId, String path) {
+        String url = properties.getBaseUrl() + "/api/files/content?chatId=" + chatId + "&path=" + path;
+        ResponseEntity<String> resp = restTemplate.getForEntity(URI.create(url), String.class);
+        return resp.getBody() == null ? "Файл пуст или недоступен" : resp.getBody();
+    }
+
+    public byte[] downloadFile(Long chatId, String path) {
+        String url = properties.getBaseUrl() + "/api/files/download?chatId=" + chatId + "&path=" + path;
+        ResponseEntity<byte[]> resp = restTemplate.getForEntity(URI.create(url), byte[].class);
+        byte[] body = resp.getBody();
+        return body == null ? new byte[0] : body;
     }
 
     /**
