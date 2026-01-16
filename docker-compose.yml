@@ -90,8 +90,6 @@ services:
     environment:
       CODER_ACCESS_URL: http://localhost:3000
 
-volumes:
-  coder_data:
   minio:
     image: quay.io/minio/minio
     container_name: minio
@@ -106,4 +104,5 @@ volumes:
     command: server /data --console-address ":9001"
 
 volumes:
+  coder_data:
   minio-data:
