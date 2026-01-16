@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package rep_tracker;
+
+option go_package = "rep_tracker/proto;proto";
+
+import "google/protobuf/empty.proto";
+
+message TrackingRepo {
+  string link = 1;
+  string chat_id = 2;
+}
+
+service RepTrackerService {
+  rpc AddTrackingRepo(TrackingRepo) returns (google.protobuf.Empty);
+  rpc RemoveTrackingRepo(TrackingRepo) returns (google.protobuf.Empty);
+}

@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package coder_manager;
+
+option go_package = "coder_manager/pkg/proto;proto";
+
+import "google/protobuf/timestamp.proto";
+
+message CreateEditorSessionRequest {
+  string repo = 1;
+  string branch = 2;
+  string path = 3;
+  string chat_id = 4;
+  int64 ttl_seconds = 5;
+  string s3_key = 6;
+}
+
+message CreateEditorSessionResponse {
+  string one_time_url = 1;
+  string session_id = 2;
+  google.protobuf.Timestamp expires_at = 3;
+}
+
+service CoderManagerService {
+  rpc CreateEditorSession(CreateEditorSessionRequest) returns (CreateEditorSessionResponse);
+}
