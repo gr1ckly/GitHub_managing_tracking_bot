@@ -57,11 +57,11 @@ func NewS3Storage(cfg Config) (*S3Storage, error) {
 		)))
 		forcePathStyle = true
 	}
-	cfg, err := awsconfig.LoadDefaultConfig(context.Background(), cfgOpts...)
+	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background(), cfgOpts...)
 	if err != nil {
 		return nil, err
 	}
-	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
+	client := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
 		o.UsePathStyle = forcePathStyle
 	})
 	uploader := manager.NewUploader(client, func(u *manager.Uploader) {

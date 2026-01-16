@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	"coder_manager/internal/coder_bootstrap"
 	dao "coder_manager/pkg/dao"
 	"coder_manager/pkg/proxy"
 	"coder_manager/pkg/repo"
@@ -114,10 +116,18 @@ func loadProxyConfig() (proxy.Config, error) {
 	if dbDSN == "" {
 		return proxy.Config{}, errors.New("DB_DSN is required")
 	}
-	coderToken := os.Getenv("CODER_ACCESS_TOKEN")
-	if coderToken == "" {
+	bootstrapCfg, err := loadBootstrapConfig(false)
+	if err != nil {
+		return proxy.Config{}, err
+	}
+	bootstrapResult, err := coder_bootstrap.Ensure(context.Background(), bootstrapCfg)
+	if err != nil {
+		return proxy.Config{}, err
+	}
+	if bootstrapResult.AccessToken == "" {
 		return proxy.Config{}, errors.New("CODER_ACCESS_TOKEN is required")
 	}
+	coderToken := bootstrapResult.AccessToken
 	port := os.Getenv("PROXY_PORT")
 	if port == "" {
 		port = "8082"
@@ -140,4 +150,62 @@ func loadProxyConfig() (proxy.Config, error) {
 		TokenQueryParam:  tokenParam,
 		PathPrefix:       pathPrefix,
 	}, nil
+}
+
+func loadBootstrapConfig(requireTemplate bool) (coder_bootstrap.Config, error) {
+	tokenLifetime, err := durationFromEnv("CODER_BOOTSTRAP_TOKEN_LIFETIME", 0)
+	if err != nil {
+		return coder_bootstrap.Config{}, err
+	}
+	waitTimeout, err := durationFromEnv("CODER_BOOTSTRAP_WAIT_TIMEOUT", 0)
+	if err != nil {
+		return coder_bootstrap.Config{}, err
+	}
+	waitInterval, err := durationFromEnv("CODER_BOOTSTRAP_WAIT_INTERVAL", 0)
+	if err != nil {
+		return coder_bootstrap.Config{}, err
+	}
+	tokenScope := codersdk.APIKeyScopeAll
+	if raw := strings.TrimSpace(os.Getenv("CODER_BOOTSTRAP_TOKEN_SCOPE")); raw != "" {
+		switch strings.ToLower(raw) {
+		case string(codersdk.APIKeyScopeApplicationConnect):
+			tokenScope = codersdk.APIKeyScopeApplicationConnect
+		case string(codersdk.APIKeyScopeAll):
+			tokenScope = codersdk.APIKeyScopeAll
+		default:
+			return coder_bootstrap.Config{}, errors.New("invalid CODER_BOOTSTRAP_TOKEN_SCOPE")
+		}
+	}
+	return coder_bootstrap.Config{
+		URL:                     os.Getenv("CODER_URL"),
+		AccessToken:             os.Getenv("CODER_ACCESS_TOKEN"),
+		TemplateID:              os.Getenv("CODER_TEMPLATE_ID"),
+		TemplateVersionID:       os.Getenv("CODER_TEMPLATE_VERSION_ID"),
+		TemplateVersionPresetID: os.Getenv("CODER_TEMPLATE_VERSION_PRESET_ID"),
+		TemplateName:            os.Getenv("CODER_BOOTSTRAP_TEMPLATE_NAME"),
+		TemplateExampleID:       os.Getenv("CODER_BOOTSTRAP_TEMPLATE_EXAMPLE_ID"),
+		TemplateExampleName:     os.Getenv("CODER_BOOTSTRAP_TEMPLATE_EXAMPLE_NAME"),
+		UserEmail:               os.Getenv("CODER_BOOTSTRAP_EMAIL"),
+		Username:                os.Getenv("CODER_BOOTSTRAP_USERNAME"),
+		UserPassword:            os.Getenv("CODER_BOOTSTRAP_PASSWORD"),
+		UserFullName:            os.Getenv("CODER_BOOTSTRAP_NAME"),
+		TokenName:               os.Getenv("CODER_BOOTSTRAP_TOKEN_NAME"),
+		TokenLifetime:           tokenLifetime,
+		TokenScope:              tokenScope,
+		WaitTimeout:             waitTimeout,
+		WaitInterval:            waitInterval,
+		RequireTemplate:         requireTemplate,
+	}, nil
+}
+
+func durationFromEnv(key string, fallback time.Duration) (time.Duration, error) {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback, nil
+	}
+	parsed, err := time.ParseDuration(raw)
+	if err != nil {
+		return fallback, err
+	}
+	return parsed, nil
 }

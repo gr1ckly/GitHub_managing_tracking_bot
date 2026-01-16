@@ -17,6 +17,8 @@ type WebhookNotifier struct {
 	client   *http.Client
 }
 
+type Notifier = internalnotifier.Notifier
+
 type fileSavePayload struct {
 	FileID  int       `json:"file_id"`
 	SavedAt time.Time `json:"saved_at"`

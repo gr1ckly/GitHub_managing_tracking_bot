@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"coder_manager/internal/coder_bootstrap"
 	"coder_manager/internal/coder_service"
 	"coder_manager/internal/grpc_server"
 	"coder_manager/internal/tasks"
@@ -21,6 +22,7 @@ import (
 	"coder_manager/pkg/proto"
 	"coder_manager/pkg/repo"
 
+	"github.com/coder/coder/v2/codersdk"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
@@ -46,10 +48,6 @@ func main() {
 	if err != nil {
 		zap.S().Fatalw("config load failed", "error", err)
 	}
-	coderAccessToken, err := requireEnv("CODER_ACCESS_TOKEN")
-	if err != nil {
-		zap.S().Fatalw("config load failed", "error", err)
-	}
 	grpcPort := envOrDefault("GRPC_PORT", "9090")
 	sessionSaverPeriod, err := durationFromEnv("SESSION_SAVER_PERIOD", 30*time.Second)
 	if err != nil {
@@ -62,6 +60,27 @@ func main() {
 	coderCfg, err := loadCoderConfig()
 	if err != nil {
 		zap.S().Fatalw("config load failed", "error", err)
+	}
+	bootstrapCfg, err := loadBootstrapConfig(true)
+	if err != nil {
+		zap.S().Fatalw("bootstrap config load failed", "error", err)
+	}
+	bootstrapResult, err := coder_bootstrap.Ensure(context.Background(), bootstrapCfg)
+	if err != nil {
+		zap.S().Fatalw("coder bootstrap failed", "error", err)
+	}
+	if bootstrapResult.AccessToken == "" {
+		zap.S().Fatalw("coder bootstrap failed", "error", "missing coder access token")
+	}
+	coderCfg.AccessToken = bootstrapResult.AccessToken
+	if bootstrapResult.TemplateID != "" {
+		coderCfg.TemplateID = bootstrapResult.TemplateID
+	}
+	if bootstrapResult.TemplateVersionID != "" {
+		coderCfg.TemplateVersionID = bootstrapResult.TemplateVersionID
+	}
+	if bootstrapResult.TemplateVersionPresetID != "" {
+		coderCfg.TemplateVersionPresetID = bootstrapResult.TemplateVersionPresetID
 	}
 	s3Cfg, err := loadS3Config()
 	if err != nil {
@@ -99,7 +118,7 @@ func main() {
 	if err != nil {
 		zap.S().Fatalw("coder client init failed", "error", err)
 	}
-	service := coder_service.NewService(repoStore, coderClient, storage, notifyClient, proxyBaseURL, coderAccessToken)
+	service := coder_service.NewService(repoStore, coderClient, storage, notifyClient, proxyBaseURL, coderCfg.AccessToken)
 
 	saver := tasks.NewSessionSaver(service, sessionSaverPeriod, sessionSaverLimit)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -177,30 +196,12 @@ func loadCoderConfig() (coder_client.Config, error) {
 	if err != nil {
 		return coder_client.Config{}, err
 	}
-	coderTemplateID, err := requireEnv("CODER_TEMPLATE_ID")
-	if err != nil {
-		return coder_client.Config{}, err
-	}
-	coderTemplateVersionID, err := requireEnv("CODER_TEMPLATE_VERSION_ID")
-	if err != nil {
-		return coder_client.Config{}, err
-	}
-	coderTemplateVersionPresetID, err := requireEnv("CODER_TEMPLATE_VERSION_PRESET_ID")
-	if err != nil {
-		return coder_client.Config{}, err
-	}
-	coderUser, err := requireEnv("CODER_USER")
-	if err != nil {
-		return coder_client.Config{}, err
-	}
-	coderEditorSlug, err := requireEnv("CODER_EDITOR_APP_SLUG")
-	if err != nil {
-		return coder_client.Config{}, err
-	}
-	coderAgentName, err := requireEnv("CODER_AGENT_NAME")
-	if err != nil {
-		return coder_client.Config{}, err
-	}
+	coderTemplateID := strings.TrimSpace(os.Getenv("CODER_TEMPLATE_ID"))
+	coderTemplateVersionID := strings.TrimSpace(os.Getenv("CODER_TEMPLATE_VERSION_ID"))
+	coderTemplateVersionPresetID := strings.TrimSpace(os.Getenv("CODER_TEMPLATE_VERSION_PRESET_ID"))
+	coderUser := envOrDefault("CODER_USER", "coder")
+	coderEditorSlug := envOrDefault("CODER_EDITOR_APP_SLUG", "code-server")
+	coderAgentName := envOrDefault("CODER_AGENT_NAME", "coder")
 	return coder_client.Config{
 		URL:                     coderURL,
 		AccessToken:             os.Getenv("CODER_ACCESS_TOKEN"),
@@ -258,6 +259,52 @@ func envOrDefault(key, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func loadBootstrapConfig(requireTemplate bool) (coder_bootstrap.Config, error) {
+	tokenLifetime, err := durationFromEnv("CODER_BOOTSTRAP_TOKEN_LIFETIME", 0)
+	if err != nil {
+		return coder_bootstrap.Config{}, err
+	}
+	waitTimeout, err := durationFromEnv("CODER_BOOTSTRAP_WAIT_TIMEOUT", 0)
+	if err != nil {
+		return coder_bootstrap.Config{}, err
+	}
+	waitInterval, err := durationFromEnv("CODER_BOOTSTRAP_WAIT_INTERVAL", 0)
+	if err != nil {
+		return coder_bootstrap.Config{}, err
+	}
+	tokenScope := codersdk.APIKeyScopeAll
+	if raw := strings.TrimSpace(os.Getenv("CODER_BOOTSTRAP_TOKEN_SCOPE")); raw != "" {
+		switch strings.ToLower(raw) {
+		case string(codersdk.APIKeyScopeApplicationConnect):
+			tokenScope = codersdk.APIKeyScopeApplicationConnect
+		case string(codersdk.APIKeyScopeAll):
+			tokenScope = codersdk.APIKeyScopeAll
+		default:
+			return coder_bootstrap.Config{}, errors.New("invalid CODER_BOOTSTRAP_TOKEN_SCOPE")
+		}
+	}
+	return coder_bootstrap.Config{
+		URL:                     os.Getenv("CODER_URL"),
+		AccessToken:             os.Getenv("CODER_ACCESS_TOKEN"),
+		TemplateID:              os.Getenv("CODER_TEMPLATE_ID"),
+		TemplateVersionID:       os.Getenv("CODER_TEMPLATE_VERSION_ID"),
+		TemplateVersionPresetID: os.Getenv("CODER_TEMPLATE_VERSION_PRESET_ID"),
+		TemplateName:            os.Getenv("CODER_BOOTSTRAP_TEMPLATE_NAME"),
+		TemplateExampleID:       os.Getenv("CODER_BOOTSTRAP_TEMPLATE_EXAMPLE_ID"),
+		TemplateExampleName:     os.Getenv("CODER_BOOTSTRAP_TEMPLATE_EXAMPLE_NAME"),
+		UserEmail:               os.Getenv("CODER_BOOTSTRAP_EMAIL"),
+		Username:                os.Getenv("CODER_BOOTSTRAP_USERNAME"),
+		UserPassword:            os.Getenv("CODER_BOOTSTRAP_PASSWORD"),
+		UserFullName:            os.Getenv("CODER_BOOTSTRAP_NAME"),
+		TokenName:               os.Getenv("CODER_BOOTSTRAP_TOKEN_NAME"),
+		TokenLifetime:           tokenLifetime,
+		TokenScope:              tokenScope,
+		WaitTimeout:             waitTimeout,
+		WaitInterval:            waitInterval,
+		RequireTemplate:         requireTemplate,
+	}, nil
 }
 
 func durationFromEnv(key string, fallback time.Duration) (time.Duration, error) {
