@@ -1,6 +1,74 @@
-version: "3.9"
-
 services:
+  link_tracker:
+    build:
+      context: .
+      dockerfile: rep_tracker/cmd/link_tracker/Dockerfile
+    environment:
+      SERVICE_NAME: link_tracker
+      DB_DSN: postgres://rep_user:rep_pass@postgres:5432/rep_tracker?sslmode=disable
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_TOPIC: rep_tracker_changes
+      TRACK_BATCH_SIZE: "100"
+      TRACK_INTERVAL_SEC: "60"
+
+  rep_tracker_server:
+    build:
+      context: .
+      dockerfile: rep_tracker/cmd/server/Dockerfile
+    environment:
+      SERVICE_NAME: rep_tracker_server
+      DB_DSN: postgres://rep_user:rep_pass@postgres:5432/rep_tracker?sslmode=disable
+      GRPC_ADDR: 0.0.0.0:8081
+      GRPC_TRANSPORT: tcp
+      GRPC_ENABLE_HEALTH: "true"
+      GRPC_ENABLE_REFLECTION: "true"
+    ports:
+      - "8081:8081"
+
+  coder_manager_server:
+    build:
+      context: .
+      dockerfile: coder_manager/cmd/coder_server/Dockerfile
+    environment:
+      DB_DSN: postgres://rep_user:rep_pass@postgres:5432/rep_tracker?sslmode=disable
+      GRPC_PORT: "9090"
+      PROXY_BASE_URL: http://coder_proxy:8082
+      CODER_URL: http://coder:3000
+      FILE_SAVE_NOTIFY_TIMEOUT: 5s
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_REGION: us-east-1
+      S3_BUCKET: coder-files
+      S3_FORCE_PATH_STYLE: "true"
+    ports:
+      - "9090:9090"
+    depends_on:
+      - minio
+      - coder
+
+  coder_proxy:
+    build:
+      context: .
+      dockerfile: coder_manager/cmd/coder_proxy/Dockerfile
+    environment:
+      DB_DSN: postgres://rep_user:rep_pass@postgres:5432/rep_tracker?sslmode=disable
+      PROXY_PORT: "8082"
+      CODER_URL: http://coder:3000
+    ports:
+      - "8082:8082"
+
+  coder:
+    image: ghcr.io/coder/coder:latest
+    container_name: coder
+    ports:
+      - "3000:3000"
+    volumes:
+      - coder_data:/home/coder
+    restart: unless-stopped
+    environment:
+      CODER_ACCESS_URL: http://localhost:3000
+
   minio:
     image: quay.io/minio/minio
     container_name: minio
@@ -15,4 +83,5 @@ services:
     command: server /data --console-address ":9001"
 
 volumes:
+  coder_data:
   minio-data:

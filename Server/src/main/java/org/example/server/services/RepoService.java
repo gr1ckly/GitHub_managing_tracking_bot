@@ -3,7 +3,13 @@ package org.example.server.services;
 import org.example.server.model.dto.*;
 import org.example.server.model.entity.*;
 import org.example.server.model.enums.FileState;
-import org.example.server.repos.*;
+import org.example.server.repos.EditorSessionRepository;
+import org.example.server.repos.FileRepository;
+import org.example.server.repos.RepoRepository;
+import org.example.server.repos.TokensRepository;
+import org.example.server.repos.UserRepoRepository;
+import org.example.server.repos.UserRepository;
+import org.example.server.integrations.RepTrackerClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -27,30 +33,30 @@ public class RepoService {
     private final RepoRepository repoRepository;
     private final UserRepoRepository userRepoRepository;
     private final FileRepository fileRepository;
-    private final NotificationRepository notificationRepository;
     private final EditorSessionRepository editorSessionRepository;
     private final StorageService storageService;
     private final TokensRepository tokensRepository;
     private final GitHubClientImpl gitHubClient;
+    private final RepTrackerClient repTrackerClient;
 
     public RepoService(UserRepository userRepository,
                        RepoRepository repoRepository,
                        UserRepoRepository userRepoRepository,
                        FileRepository fileRepository,
-                       NotificationRepository notificationRepository,
                        EditorSessionRepository editorSessionRepository,
                        StorageService storageService,
                        TokensRepository tokensRepository,
-                       GitHubClientImpl gitHubClient) {
+                       GitHubClientImpl gitHubClient,
+                       RepTrackerClient repTrackerClient) {
         this.userRepository = userRepository;
         this.repoRepository = repoRepository;
         this.userRepoRepository = userRepoRepository;
         this.fileRepository = fileRepository;
-        this.notificationRepository = notificationRepository;
         this.editorSessionRepository = editorSessionRepository;
         this.storageService = storageService;
         this.tokensRepository = tokensRepository;
         this.gitHubClient = gitHubClient;
+        this.repTrackerClient = repTrackerClient;
     }
 
     @Transactional
@@ -82,6 +88,8 @@ public class RepoService {
 
             // Синхронизируем дерево репозитория в БД
             syncRepoTreeFromGitHub(user, repo);
+            // Уведомляем внешний сервис о подписке
+            repTrackerClient.addTrackingRepo(repo.getUrl(), user.getChatId());
         }catch(Exception e){
             log.warn(e.getLocalizedMessage());
         }
@@ -183,23 +191,6 @@ public class RepoService {
         // Заглушка под будущее подключение к Git: здесь можно триггерить фоновые задачи push
         log.info("Запрос push от chatId {} для репо {}", user.getChatId(), repo.getUrl());
         return "Запрос на push принят";
-    }
-
-    @Transactional
-    public String watchRepository(WatchRepositoryRequest request) {
-        User user = requireUser(request.chatId());
-        Repo repo = requireUserRepo(user);
-        Notification notification = notificationRepository.findByUserAndRepo(user, repo)
-                .orElseGet(() -> {
-                    Notification n = new Notification();
-                    n.setUser(user);
-                    n.setRepo(repo);
-                    n.setCreatedAt(OffsetDateTime.now());
-                    return n;
-                });
-        notification.setEnabled(true);
-        notificationRepository.save(notification);
-        return "Отслеживание включено";
     }
 
     @Transactional(readOnly = true)

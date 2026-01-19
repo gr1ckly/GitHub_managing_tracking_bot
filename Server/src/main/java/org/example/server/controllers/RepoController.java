@@ -2,7 +2,6 @@ package org.example.server.controllers;
 
 import org.example.server.model.dto.AddRepositoryRequest;
 import org.example.server.model.dto.PushRepositoryRequest;
-import org.example.server.model.dto.WatchRepositoryRequest;
 import org.example.server.model.dto.TreeEntryDto;
 import org.example.server.services.RepoService;
 import org.springframework.http.ResponseEntity;
@@ -28,11 +27,6 @@ public class RepoController {
     @PostMapping("/push")
     public ResponseEntity<String> push(@RequestBody PushRepositoryRequest request) {
         return ResponseEntity.ok(repoService.pushRepository(request));
-    }
-
-    @PostMapping("/watch")
-    public ResponseEntity<String> watch(@RequestBody WatchRepositoryRequest request) {
-        return ResponseEntity.ok(repoService.watchRepository(request));
     }
 
     @GetMapping("/tree")

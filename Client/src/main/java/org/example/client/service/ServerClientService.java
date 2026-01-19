@@ -59,13 +59,6 @@ public class ServerClientService {
         return "Изменения отправлены";
     }
 
-    public String watchRepository(Long chatId, String repoUrl) {
-        URI uri = URI.create(properties.getBaseUrl() + "/api/repos/watch");
-        WatchRepositoryRequest request = new WatchRepositoryRequest(chatId, repoUrl);
-        restTemplate.postForEntity(uri, request, Void.class);
-        return "Отслеживание репозитория включено";
-    }
-
     public String requestEditLink(Long chatId, String path) {
         URI uri = URI.create(properties.getBaseUrl() + "/api/files/edit-link");
         RequestEditLink request = new RequestEditLink(chatId, path);
