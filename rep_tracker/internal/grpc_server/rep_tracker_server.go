@@ -6,6 +6,7 @@ import (
 	"rep_tracker/internal/server_model"
 	"rep_tracker/pkg/errs"
 	"rep_tracker/pkg/proto"
+	"go.uber.org/zap"
 
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
@@ -28,8 +29,24 @@ func NewRepTrackerServiceServer(repService *rep_service.RepService) *RepTrackerS
 }
 
 func (server *RepTrackerServiceServer) AddTrackingRepo(ctx context.Context, trackingRepo *proto.TrackingRepo) (*emptypb.Empty, error) {
-	return server.doWithServerModelTrackingRepo(ctx, trackingRepo, server.repService.AddTrackingRepo)
-
+	zap.L().Info("Received AddTrackingRepo gRPC request", 
+		zap.String("link", trackingRepo.GetLink()), 
+		zap.String("chatId", trackingRepo.GetChatId()))
+	
+	result, err := server.doWithServerModelTrackingRepo(ctx, trackingRepo, server.repService.AddTrackingRepo)
+	
+	if err != nil {
+		zap.L().Error("AddTrackingRepo failed", 
+			zap.String("link", trackingRepo.GetLink()), 
+			zap.String("chatId", trackingRepo.GetChatId()),
+			zap.Error(err))
+	} else {
+		zap.L().Info("AddTrackingRepo completed successfully", 
+			zap.String("link", trackingRepo.GetLink()), 
+			zap.String("chatId", trackingRepo.GetChatId()))
+	}
+	
+	return result, err
 }
 
 func (server *RepTrackerServiceServer) RemoveTrackingRepo(ctx context.Context, trackingRepo *proto.TrackingRepo) (*emptypb.Empty, error) {

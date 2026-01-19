@@ -28,12 +28,4 @@
             DROP TYPE IF EXISTS FILE_STATE;
         </rollback>
     </changeSet>
-
-    <changeSet id="002-file-state-pending-delete" author="codex">
-        <sql>ALTER TYPE FILE_STATE ADD VALUE IF NOT EXISTS 'PENDING_DELETE';</sql>
-        <rollback>
-            <!-- нельзя удалить значение enum в postgres; откат не поддерживается -->
-        </rollback>
-    </changeSet>
-
-</databaseChangeLog>
+    </databaseChangeLog>

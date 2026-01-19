@@ -14,6 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
@@ -61,20 +62,51 @@ public class RepoService {
 
     @Transactional
     public String addRepository(AddRepositoryRequest request) {
+        log.info("Starting addRepository process: chatId={}, repositoryUrl={}", request.chatId(), request.repositoryUrl());
+        log.info("Transaction status: active={}, readOnly={}", 
+            TransactionSynchronizationManager.isActualTransactionActive(),
+            TransactionSynchronizationManager.isCurrentTransactionReadOnly());
+        
         try {
+            // Step 1: Get or create user
+            log.info("Step 1: Finding user for chatId={}", request.chatId());
             User user = requireUser(request.chatId());
+            log.info("Found user: id={}, chatId={}", user.getId(), user.getChatId());
+            
+            // Step 2: Get or create repository
+            log.info("Step 2: Finding/creating repository for URL={}", request.repositoryUrl());
             Repo repo = repoRepository.findByUrl(request.repositoryUrl())
                     .orElseGet(() -> {
+                        log.info("Creating new repository for URL={}", request.repositoryUrl());
                         Repo r = new Repo();
                         r.setUrl(request.repositoryUrl());
                         String[] parts = parseOwnerAndName(request.repositoryUrl());
                         r.setOwner(parts[0]);
                         r.setName(parts[1]);
                         r.setAddedAt(OffsetDateTime.now());
-                        return repoRepository.save(r);
+                        Repo saved = repoRepository.save(r);
+                        log.info("Created repository: id={}, owner={}, name={}", saved.getId(), saved.getOwner(), saved.getName());
+                        
+                        // Force flush to ensure it's written to DB
+                        repoRepository.flush();
+                        log.info("Repository flushed to database");
+                        
+                        // Verify repository was actually saved
+                        repoRepository.findById(saved.getId())
+                            .ifPresentOrElse(
+                                foundRepo -> log.info("Repository verified in database: id={}, url={}", foundRepo.getId(), foundRepo.getUrl()),
+                                () -> log.info("REPOSITORY NOT FOUND IN DATABASE AFTER SAVE! id={}", saved.getId())
+                            );
+                        
+                        return saved;
                     });
+            log.info("Repository: id={}, url={}", repo.getId(), repo.getUrl());
+            
+            // Step 3: Link user to repository if not already linked
+            log.info("Step 3: Checking if user {} already linked to repo {}", user.getId(), repo.getId());
             boolean linked = userRepoRepository.findByUserAndRepo_Id(user, repo.getId()).isPresent();
             if (!linked) {
+                log.info("Creating user-repo link: userId={}, repoId={}", user.getId(), repo.getId());
                 UserRepo link = new UserRepo();
                 UserRepoId linkId = new UserRepoId();
                 linkId.setUserId(user.getId());
@@ -84,16 +116,54 @@ public class RepoService {
                 link.setRepo(repo);
                 link.setAddedAt(OffsetDateTime.now());
                 userRepoRepository.save(link);
+                userRepoRepository.flush();
+                log.info("User-repo link created successfully");
+            } else {
+                log.info("User-repo link already exists");
             }
 
-            // Синхронизируем дерево репозитория в БД
-            syncRepoTreeFromGitHub(user, repo);
-            // Уведомляем внешний сервис о подписке
-            repTrackerClient.addTrackingRepo(repo.getUrl(), user.getChatId());
+            // Step 4: Sync repository tree from GitHub
+            log.info("Step 4: Syncing repository tree from GitHub");
+            try {
+                syncRepoTreeFromGitHub(user, repo);
+                log.info("Repository tree synced successfully");
+            } catch (Exception e) {
+                log.info("Failed to sync repository tree: {}", e.getMessage(), e);
+                // Continue anyway - this shouldn't block repo addition
+            }
+            
+            log.info("Repository addition completed successfully: chatId={}, repositoryUrl={}", 
+                    request.chatId(), request.repositoryUrl());
+            
+            // Call gRPC service after transaction commit
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    log.info("Transaction committed, notifying RepTracker service");
+                    notifyRepTrackerService(repo.getUrl(), user.getChatId());
+                }
+            });
+            
+            return "Репозиторий добавлен";
+            
         }catch(Exception e){
-            log.warn(e.getLocalizedMessage());
+            log.info("Failed to add repository: chatId={}, repositoryUrl={}, error={}", 
+                    request.chatId(), request.repositoryUrl(), e.getMessage(), e);
+            throw e;
         }
-        return "Репозиторий добавлен";
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void notifyRepTrackerService(String repoUrl, Long chatId) {
+        log.info("Step 5: Notifying RepTracker service: repoUrl={}, chatId={}", repoUrl, chatId);
+        try {
+            repTrackerClient.addTrackingRepo(repoUrl, chatId);
+            log.info("RepTracker service notified successfully");
+        } catch (Exception e) {
+            log.info("Failed to notify RepTracker service: repoUrl={}, chatId={}, error={}", 
+                    repoUrl, chatId, e.getMessage(), e);
+            // Don't throw - repo is already added, just tracking might fail
+        }
     }
 
     @Transactional

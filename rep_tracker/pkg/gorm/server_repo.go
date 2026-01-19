@@ -9,6 +9,7 @@ import (
 
 	"rep_tracker/internal/server_model"
 	"rep_tracker/pkg/errs"
+	"go.uber.org/zap"
 
 	gormio "gorm.io/gorm"
 )
@@ -100,25 +101,54 @@ func resolveRepoID(ctx context.Context, tx *gormio.DB, link string) (int, error)
 	if link == "" {
 		return 0, fmt.Errorf("repo url is required")
 	}
+	
+	zap.L().Debug("Looking for repository", 
+		zap.String("link", link), 
+		zap.String("linkWithGit", link+".git"))
+	
 	repo, err := gormio.G[Repo](tx).
 		Where("url = ? OR url = ?", link, link+".git").
 		First(ctx)
+	
 	if err == nil {
+		zap.L().Debug("Repository found", 
+			zap.String("link", link), 
+			zap.Int("repoId", repo.ID))
 		return repo.ID, nil
 	}
+	
 	if !errors.Is(err, gormio.ErrRecordNotFound) {
+		zap.L().Error("Database error while searching for repository", 
+			zap.String("link", link), 
+			zap.Error(err))
 		return 0, err
 	}
+	
+	zap.L().Warn("Repository not found, will create new one", 
+		zap.String("link", link))
 
 	owner, name := parseOwnerRepoFromLink(link)
+	zap.L().Debug("Parsed owner and name", 
+		zap.String("owner", owner), 
+		zap.String("name", name))
+	
 	newRepo := Repo{
 		URL:   link,
 		Owner: ptrString(owner),
 		Name:  ptrString(name),
 	}
+	
 	if err := gormio.G[Repo](tx).Create(ctx, &newRepo); err != nil {
+		zap.L().Error("Failed to create repository", 
+			zap.String("link", link), 
+			zap.Error(err))
 		return 0, err
 	}
+	
+	zap.L().Info("Repository created successfully", 
+		zap.String("link", link), 
+		zap.Int("repoId", newRepo.ID))
+	
 	return newRepo.ID, nil
 }
 

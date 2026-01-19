@@ -42,15 +42,28 @@ func main() {
 	if err != nil {
 		zap.L().Fatal("invalid config", zap.Error(err))
 	}
+	
+	zap.L().Info("configuration loaded", 
+		zap.String("dbDSN", cfg.dbDSN),
+		zap.Strings("kafkaBrokers", cfg.kafkaBrokers),
+		zap.String("kafkaTopic", cfg.kafkaTopic))
 
+	zap.L().Info("attempting to connect to database")
 	db, err := gormio.Open(postgres.Open(cfg.dbDSN), &gormio.Config{})
 	if err != nil {
-		zap.L().Fatal("db connection failed", zap.Error(err))
+		zap.L().Fatal("db connection failed", 
+			zap.String("dbDSN", cfg.dbDSN),
+			zap.Error(err))
 	}
+	
+	zap.L().Info("database connection successful")
 
+	zap.L().Info("initializing repositories")
 	globalRepo := repgorm.NewGormSchedulerRepo(db)
 	tokenRepo := repgorm.NewGormTokenRepo(db)
 	ghClient := github.NewGithubClient()
+	
+	zap.L().Info("initializing kafka writer")
 	writer, err := kafka.NewKafkaNotificationWriter(kafka.KafkaNotificationWriterConfig{
 		Addr:         cfg.kafkaBrokers,
 		Topic:        cfg.kafkaTopic,
@@ -64,10 +77,15 @@ func main() {
 	}
 	defer writer.Close()
 
+	zap.L().Info("initializing check commits function")
 	checkFunc := tasks.GetCheckCommitsFunc(cfg.trackBatchSize, globalRepo, tokenRepo, ghClient, writer)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	zap.L().Info("starting scheduler", 
+		zap.Duration("trackInterval", cfg.trackInterval),
+		zap.Int("trackBatchSize", cfg.trackBatchSize))
 
 	var scheduler scheduler2.Scheduler
 	scheduler.Run(ctx, cfg.trackInterval, checkFunc)

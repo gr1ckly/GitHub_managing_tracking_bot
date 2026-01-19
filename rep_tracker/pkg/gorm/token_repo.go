@@ -4,7 +4,6 @@ import (
 	"context"
 
 	gormio "gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 type GormTokenRepo struct {
@@ -19,15 +18,13 @@ func (r *GormTokenRepo) GetToken(ctx context.Context, chatId string) (string, er
 	var token Token
 	err := r.gorm.WithContext(ctx).Transaction(func(tx *gormio.DB) error {
 		var err error
-		token, err = gormio.G[Token](tx).
-			Joins(clause.JoinTarget{Type: clause.InnerJoin, Table: "users"}, func(db gormio.JoinBuilder, joinTable clause.Table, curTable clause.Table) error {
-				db.Where("users.id = tokens.user_id")
-				return nil
-			}).
+		err = tx.Table("tokens").
+			Select("tokens.*").
+			Joins("INNER JOIN users ON users.id = tokens.user_id").
 			Where("users.chat_id = ?", chatId).
-			Order("created_at DESC").
+			Order("tokens.created_at DESC").
 			Limit(1).
-			First(ctx)
+			First(&token).Error
 		return err
 	})
 	if err != nil {

@@ -25,12 +25,22 @@ public class RepTrackerClient implements DisposableBean {
     }
 
     public void addTrackingRepo(String link, Long chatId) {
-        TrackingRepo request = TrackingRepo.newBuilder()
-                .setLink(link)
-                .setChatId(chatId.toString())
-                .build();
-        stub.addTrackingRepo(request);
-        log.info("RepTracker notified for repo {} and chat {}", link, chatId);
+        log.info("Starting RepTracker gRPC call: link={}, chatId={}", link, chatId);
+        try {
+            log.info("Creating gRPC request: link={}, chatId={}", link, chatId);
+            TrackingRepo request = TrackingRepo.newBuilder()
+                    .setLink(link)
+                    .setChatId(chatId.toString())
+                    .build();
+            
+            log.info("Sending gRPC request to RepTracker service");
+            stub.addTrackingRepo(request);
+            
+            log.info("RepTracker gRPC call completed successfully: link={}, chatId={}", link, chatId);
+        } catch (Exception e) {
+            log.info("RepTracker gRPC call failed: link={}, chatId={}, error={}", link, chatId, e.getMessage(), e);
+            throw e;
+        }
     }
 
     @Override

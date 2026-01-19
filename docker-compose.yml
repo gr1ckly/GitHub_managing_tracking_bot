@@ -5,32 +5,39 @@ services:
       dockerfile: rep_tracker/cmd/link_tracker/Dockerfile
     environment:
       SERVICE_NAME: link_tracker
-      DB_DSN: postgres://rep_user:rep_pass@postgres:5432/rep_tracker?sslmode=disable
+      DB_DSN: postgres://rep_user:rep_pass@postgres:5432/rep_tracker?sslmode=disable&connect_timeout=10&statement_timeout=0
       KAFKA_BROKERS: kafka:9092
       KAFKA_TOPIC: rep_tracker_changes
       TRACK_BATCH_SIZE: "100"
       TRACK_INTERVAL_SEC: "60"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   rep_tracker_server:
+    container_name: rep-tracker-server
     build:
       context: .
       dockerfile: rep_tracker/cmd/server/Dockerfile
     environment:
       SERVICE_NAME: rep_tracker_server
-      DB_DSN: postgres://rep_user:rep_pass@postgres:5432/rep_tracker?sslmode=disable
+      DB_DSN: postgres://rep_user:rep_pass@postgres:5432/rep_tracker?sslmode=disable&connect_timeout=10&statement_timeout=0
       GRPC_ADDR: 0.0.0.0:8081
       GRPC_TRANSPORT: tcp
       GRPC_ENABLE_HEALTH: "true"
       GRPC_ENABLE_REFLECTION: "true"
-    ports:
-      - "8081:8081"
+    expose:
+      - "8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   coder_manager_server:
     build:
       context: .
       dockerfile: coder_manager/cmd/coder_server/Dockerfile
     environment:
-      DB_DSN: postgres://rep_user:rep_pass@postgres:5432/rep_tracker?sslmode=disable
+      DB_DSN: postgres://rep_user:rep_pass@postgres:5432/rep_tracker?sslmode=disable&connect_timeout=10&statement_timeout=0
       GRPC_PORT: "9090"
       PROXY_BASE_URL: http://coder_proxy:8082
       CODER_URL: http://coder:3000
@@ -52,7 +59,7 @@ services:
       context: .
       dockerfile: coder_manager/cmd/coder_proxy/Dockerfile
     environment:
-      DB_DSN: postgres://rep_user:rep_pass@postgres:5432/rep_tracker?sslmode=disable
+      DB_DSN: postgres://rep_user:rep_pass@postgres:5432/rep_tracker?sslmode=disable&connect_timeout=10&statement_timeout=0
       PROXY_PORT: "8082"
       CODER_URL: http://coder:3000
     ports:
@@ -81,6 +88,89 @@ services:
     volumes:
       - minio-data:/data
     command: server /data --console-address ":9001"
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: rep_user
+      POSTGRES_PASSWORD: rep_pass
+      POSTGRES_DB: rep_tracker
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rep_user"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.2
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+    depends_on: [zookeeper]
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.2
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  liquibase:
+    image: liquibase/liquibase:4.24
+    volumes:
+      - ./Server/src/main/resources/db/changelog:/liquibase/changelog
+    environment:
+      - LIQUIBASE_CLASSPATH=/liquibase/lib
+    command: >
+      --changeLogFile=db.changelog-master.xml
+      --searchPath=/liquibase/changelog
+      --url=jdbc:postgresql://postgres:5432/rep_tracker
+      --username=rep_user
+      --password=rep_pass update
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  server:
+    build:
+      context: .
+      dockerfile: Server/Dockerfile
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/rep_tracker
+      SPRING_DATASOURCE_USERNAME: rep_user
+      SPRING_DATASOURCE_PASSWORD: rep_pass
+      REPTRACKER_HOST: rep-tracker-server
+      REPTRACKER_PORT: 8081
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      # Enable SQL logging
+      SPRING_JPA_PROPERTIES_HIBERNATE_SHOW_SQL: "true"
+      SPRING_JPA_PROPERTIES_HIBERNATE_FORMAT_SQL: "true"
+      SPRING_JPA_PROPERTIES_HIBERNATE_USE_SQL_COMMENTS: "true"
+      # Transaction logging
+      LOGGING_LEVEL_OR_SPRING_TRANSACTION: "DEBUG"
+      LOGGING_LEVEL_OR_HIBERNATE_TRANSACTION: "DEBUG"
+      LOGGING_LEVEL_OR_HIBERNATE_RESOURCE: "DEBUG"
+      # Pattern for detailed logging
+      LOGGING_PATTERN_CONSOLE: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+    depends_on:
+      - liquibase
+    ports:
+      - "8083:8081"
+
+  client:
+    build:
+      context: .
+      dockerfile: Client/Dockerfile
+    environment:
+      SERVER_API_BASE_URL: http://server:8081
+    depends_on:
+      - server
+    ports:
+      - "8084:8082"
 
 volumes:
   coder_data:
