@@ -36,5 +36,6 @@ type CoderRepo interface {
 	MarkSessionConsumed(ctx context.Context, sessionID int64, consumedAt time.Time) error
 	MarkSessionExpired(ctx context.Context, sessionID int64, expiresAt time.Time) error
 	ListExpiredUnsavedSessions(ctx context.Context, now time.Time, limit int) ([]*dao.EditorSession, error)
+	ListActiveUnsavedSessions(ctx context.Context, now time.Time, limit int) ([]*dao.EditorSession, error)
 	MarkSessionSaved(ctx context.Context, sessionID int64, savedAt time.Time, storageKey string) error
 }

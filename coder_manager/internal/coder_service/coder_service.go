@@ -19,9 +19,8 @@ import (
 	"coder_manager/internal/repo"
 	dao "coder_manager/pkg/dao"
 
-	"github.com/google/go-github/v62/github"
+	"github.com/coder/coder/v2/codersdk"
 	"go.uber.org/zap"
-	"golang.org/x/oauth2"
 )
 
 type CreateEditorSessionRequest struct {
@@ -49,8 +48,6 @@ type SaveEditorSessionResponse struct {
 var ErrInvalidRequest = errors.New("invalid request")
 var ErrFileTooLarge = errors.New("file exceeds size limit")
 
-const maxGitHubFileSize = 1 << 30 // 1GB
-
 type Service struct {
 	repo             repo.CoderRepo
 	coderClient      coder_client.CoderClient
@@ -58,9 +55,13 @@ type Service struct {
 	notifier         notifier.Notifier
 	proxyBaseURL     string
 	coderAccessToken string
+	tokenQueryParam  string
 }
 
-func NewService(repo repo.CoderRepo, coderClient coder_client.CoderClient, storage file_storage.FileStorage, notifier notifier.Notifier, proxyBaseURL string, coderAccessToken string) *Service {
+func NewService(repo repo.CoderRepo, coderClient coder_client.CoderClient, storage file_storage.FileStorage, notifier notifier.Notifier, proxyBaseURL string, coderAccessToken string, tokenQueryParam string) *Service {
+	if strings.TrimSpace(tokenQueryParam) == "" {
+		tokenQueryParam = codersdk.SessionTokenCookie
+	}
 	return &Service{
 		repo:             repo,
 		coderClient:      coderClient,
@@ -68,6 +69,7 @@ func NewService(repo repo.CoderRepo, coderClient coder_client.CoderClient, stora
 		notifier:         notifier,
 		proxyBaseURL:     strings.TrimRight(proxyBaseURL, "/"),
 		coderAccessToken: coderAccessToken,
+		tokenQueryParam:  strings.TrimSpace(tokenQueryParam),
 	}
 }
 
@@ -169,12 +171,38 @@ func (s *Service) CreateEditorSession(ctx context.Context, req CreateEditorSessi
 		return nil, err
 	}
 
-	oneTimeURL := fmt.Sprintf("%s/edit/%s", s.proxyBaseURL, oneTimeToken)
+	oneTimeURL, err := s.buildEditorURL(editorURL, oneTimeToken, session.ID)
+	if err != nil {
+		return nil, err
+	}
 	return &CreateEditorSessionResponse{
 		OneTimeURL: oneTimeURL,
 		SessionID:  session.ID,
 		ExpiresAt:  &expiresAt,
 	}, nil
+}
+
+func (s *Service) buildEditorURL(editorURL string, oneTimeToken string, sessionID int64) (string, error) {
+	if s.proxyBaseURL != "" {
+		return fmt.Sprintf("%s/edit/%s", s.proxyBaseURL, oneTimeToken), nil
+	}
+	if strings.TrimSpace(editorURL) == "" {
+		return "", errors.New("editor url is empty")
+	}
+	if strings.TrimSpace(s.coderAccessToken) == "" {
+		return "", errors.New("coder access token is required to build direct editor url")
+	}
+	target, err := url.Parse(editorURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid editor url: %w", err)
+	}
+	query := target.Query()
+	query.Set(s.tokenQueryParam, s.coderAccessToken)
+	target.RawQuery = query.Encode()
+	if err := s.repo.MarkSessionConsumed(context.Background(), sessionID, time.Now()); err != nil {
+		zap.S().Warnw("mark session consumed failed for direct editor url", "session_id", sessionID, "error", err)
+	}
+	return target.String(), nil
 }
 
 func (s *Service) SaveEditorSession(ctx context.Context, req SaveEditorSessionRequest) (*SaveEditorSessionResponse, error) {
@@ -239,88 +267,34 @@ func (s *Service) HandleExpiredSessions(ctx context.Context, now time.Time, limi
 	return nil
 }
 
-func downloadGitHubFile(ctx context.Context, token string, owner string, repoName string, branch string, filePath string) (io.ReadCloser, *int64, error) {
-	if strings.TrimSpace(branch) == "" {
-		branch = "main"
-	}
-	client := newGitHubClient(ctx, token)
-	ref := branch
-	path := strings.TrimLeft(filePath, "/")
-	file, _, _, err := client.Repositories.GetContents(ctx, owner, repoName, path, &github.RepositoryContentGetOptions{Ref: ref})
+func (s *Service) HandleActiveSessions(ctx context.Context, now time.Time, limit int) error {
+	sessions, err := s.repo.ListActiveUnsavedSessions(ctx, now, limit)
 	if err != nil {
-		return nil, nil, err
+		zap.S().Errorw("list active sessions failed", "error", err)
+		return err
 	}
-	if file == nil {
-		return nil, nil, errors.New("path does not point to a file")
+	if len(sessions) == 0 {
+		return nil
 	}
-	if file.GetType() == "dir" {
-		return nil, nil, errors.New("path points to a directory")
-	}
-	var sizePtr *int64
-	if size := file.GetSize(); size > 0 {
-		sizeValue := int64(size)
-		if sizeValue > maxGitHubFileSize {
-			return nil, nil, ErrFileTooLarge
+	const maxConcurrency = 4
+	sem := make(chan struct{}, maxConcurrency)
+	var wg sync.WaitGroup
+	for _, session := range sessions {
+		if session == nil || session.File.ID == 0 {
+			continue
 		}
-		sizePtr = &sizeValue
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(session *dao.EditorSession) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if _, err := s.saveSessionFile(ctx, session, now, false); err != nil {
+				zap.S().Errorw("save active session failed", "session_id", session.ID, "error", err)
+			}
+		}(session)
 	}
-	reader, _, err := client.Repositories.DownloadContents(ctx, owner, repoName, path, &github.RepositoryContentGetOptions{Ref: ref})
-	if err != nil {
-		return nil, nil, err
-	}
-	if sizePtr == nil {
-		return limitReadCloser(reader, maxGitHubFileSize), nil, nil
-	}
-	return reader, sizePtr, nil
-}
-
-func newGitHubClient(ctx context.Context, token string) *github.Client {
-	if strings.TrimSpace(token) == "" {
-		return github.NewClient(nil)
-	}
-	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-	return github.NewClient(oauth2.NewClient(ctx, ts))
-}
-
-func ensureRepoAccess(ctx context.Context, token string, owner string, repoName string) error {
-	client := newGitHubClient(ctx, token)
-	_, _, err := client.Repositories.Get(ctx, owner, repoName)
-	return err
-}
-
-func limitReadCloser(reader io.ReadCloser, limit int64) io.ReadCloser {
-	return &limitedReadCloser{
-		reader: reader,
-		limit:  limit,
-	}
-}
-
-type limitedReadCloser struct {
-	reader io.ReadCloser
-	limit  int64
-	read   int64
-}
-
-func (l *limitedReadCloser) Read(p []byte) (int, error) {
-	if l.read >= l.limit {
-		return 0, ErrFileTooLarge
-	}
-	if int64(len(p)) > l.limit-l.read {
-		p = p[:l.limit-l.read]
-	}
-	n, err := l.reader.Read(p)
-	l.read += int64(n)
-	if err == io.EOF {
-		return n, err
-	}
-	if l.read >= l.limit {
-		return n, ErrFileTooLarge
-	}
-	return n, err
-}
-
-func (l *limitedReadCloser) Close() error {
-	return l.reader.Close()
+	wg.Wait()
+	return nil
 }
 
 func sizeOrUnknown(size *int64) int64 {
@@ -328,25 +302,6 @@ func sizeOrUnknown(size *int64) int64 {
 		return -1
 	}
 	return *size
-}
-
-func parseRepo(input string) (string, string, string, error) {
-	if strings.HasPrefix(input, "http://") || strings.HasPrefix(input, "https://") {
-		parsed, err := url.Parse(input)
-		if err != nil {
-			return "", "", "", err
-		}
-		parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
-		if len(parts) < 2 {
-			return "", "", "", errors.New("invalid repo URL")
-		}
-		return parts[0], strings.TrimSuffix(parts[1], ".git"), fmt.Sprintf("%s://%s/%s/%s", parsed.Scheme, parsed.Host, parts[0], strings.TrimSuffix(parts[1], ".git")), nil
-	}
-	parts := strings.Split(strings.Trim(input, "/"), "/")
-	if len(parts) != 2 {
-		return "", "", "", errors.New("repo must be in owner/name or url form")
-	}
-	return parts[0], parts[1], fmt.Sprintf("https://github.com/%s/%s", parts[0], parts[1]), nil
 }
 
 func generateToken(size int) (string, error) {

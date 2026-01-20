@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package coder_manager;
+
+option java_package = "org.example.server.proto";
+option java_multiple_files = true;
+
+import "google/protobuf/timestamp.proto";
+
+message CreateEditorSessionRequest {
+  string s3_key = 1;
+  string path = 2;
+  string chat_id = 3;
+  int64 ttl_seconds = 4;
+}
+
+message CreateEditorSessionResponse {
+  string one_time_url = 1;
+  string session_id = 2;
+  google.protobuf.Timestamp expires_at = 3;
+}
+
+message SaveEditorSessionRequest {
+  string session_id = 1;
+}
+
+message SaveEditorSessionResponse {
+  string s3_key = 1;
+  google.protobuf.Timestamp saved_at = 2;
+}
+
+service CoderManagerService {
+  rpc CreateEditorSession(CreateEditorSessionRequest) returns (CreateEditorSessionResponse);
+  rpc SaveEditorSession(SaveEditorSessionRequest) returns (SaveEditorSessionResponse);
+}

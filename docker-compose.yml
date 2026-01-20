@@ -32,15 +32,15 @@ services:
       postgres:
         condition: service_healthy
 
-  coder_manager_server:
+  coder-manager-server:
     build:
       context: .
       dockerfile: coder_manager/cmd/coder_server/Dockerfile
     environment:
       DB_DSN: postgres://rep_user:rep_pass@postgres:5432/rep_tracker?sslmode=disable&connect_timeout=10&statement_timeout=0
       GRPC_PORT: "9090"
-      PROXY_BASE_URL: http://coder_proxy:8082
       CODER_URL: http://coder:3000
+      CODER_BOOTSTRAP_WAIT_TIMEOUT: 5m
       FILE_SAVE_NOTIFY_TIMEOUT: 5s
       S3_ENDPOINT: http://minio:9000
       S3_ACCESS_KEY: minioadmin
@@ -51,19 +51,10 @@ services:
     ports:
       - "9090:9090"
     depends_on:
-      - minio
-      - coder
-
-  coder_proxy:
-    build:
-      context: .
-      dockerfile: coder_manager/cmd/coder_proxy/Dockerfile
-    environment:
-      DB_DSN: postgres://rep_user:rep_pass@postgres:5432/rep_tracker?sslmode=disable&connect_timeout=10&statement_timeout=0
-      PROXY_PORT: "8082"
-      CODER_URL: http://coder:3000
-    ports:
-      - "8082:8082"
+      minio:
+        condition: service_started
+      coder:
+        condition: service_healthy
 
   coder:
     image: ghcr.io/coder/coder:latest
@@ -75,6 +66,12 @@ services:
     restart: unless-stopped
     environment:
       CODER_ACCESS_URL: http://localhost:3000
+      CODER_HTTP_ADDRESS: 0.0.0.0:3000
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:3000/api/v2 > /dev/null 2>&1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   minio:
     image: quay.io/minio/minio
@@ -97,7 +94,7 @@ services:
       POSTGRES_DB: rep_tracker
     ports: ["5432:5432"]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U rep_user"]
+      test: ["CMD-SHELL", "pg_isready -U rep_user -d rep_tracker"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -156,6 +153,9 @@ services:
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: coder-files
+      CODER_MANAGER_HOST: coder-manager-server
+      CODER_MANAGER_PORT: "9090"
       # Kafka configuration
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       SPRING_KAFKA_CONSUMER_BOOTSTRAP_SERVERS: kafka:9092

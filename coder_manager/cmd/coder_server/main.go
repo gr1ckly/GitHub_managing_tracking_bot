@@ -44,16 +44,22 @@ func main() {
 	if err != nil {
 		zap.S().Fatalw("config load failed", "error", err)
 	}
-	proxyBaseURL, err := requireEnv("PROXY_BASE_URL")
-	if err != nil {
-		zap.S().Fatalw("config load failed", "error", err)
-	}
+	proxyBaseURL := strings.TrimSpace(os.Getenv("PROXY_BASE_URL"))
+	tokenQueryParam := envOrDefault("CODER_TOKEN_QUERY_PARAM", codersdk.SessionTokenCookie)
 	grpcPort := envOrDefault("GRPC_PORT", "9090")
 	sessionSaverPeriod, err := durationFromEnv("SESSION_SAVER_PERIOD", 30*time.Second)
 	if err != nil {
 		zap.S().Fatalw("config load failed", "error", err)
 	}
 	sessionSaverLimit, err := intFromEnv("SESSION_SAVER_LIMIT", 100)
+	if err != nil {
+		zap.S().Fatalw("config load failed", "error", err)
+	}
+	activeSaverPeriod, err := durationFromEnv("ACTIVE_SESSION_SAVER_PERIOD", 2*time.Minute)
+	if err != nil {
+		zap.S().Fatalw("config load failed", "error", err)
+	}
+	activeSaverLimit, err := intFromEnv("ACTIVE_SESSION_SAVER_LIMIT", 100)
 	if err != nil {
 		zap.S().Fatalw("config load failed", "error", err)
 	}
@@ -118,12 +124,14 @@ func main() {
 	if err != nil {
 		zap.S().Fatalw("coder client init failed", "error", err)
 	}
-	service := coder_service.NewService(repoStore, coderClient, storage, notifyClient, proxyBaseURL, coderCfg.AccessToken)
+	service := coder_service.NewService(repoStore, coderClient, storage, notifyClient, proxyBaseURL, coderCfg.AccessToken, tokenQueryParam)
 
 	saver := tasks.NewSessionSaver(service, sessionSaverPeriod, sessionSaverLimit)
+	activeSaver := tasks.NewActiveSessionSaver(service, activeSaverPeriod, activeSaverLimit)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	go saver.Run(ctx)
+	go activeSaver.Run(ctx)
 
 	port := grpcPort
 	listener, err := net.Listen("tcp", ":"+port)

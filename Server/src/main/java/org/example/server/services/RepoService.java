@@ -3,12 +3,12 @@ package org.example.server.services;
 import org.example.server.model.dto.*;
 import org.example.server.model.entity.*;
 import org.example.server.model.enums.FileState;
-import org.example.server.repos.EditorSessionRepository;
 import org.example.server.repos.FileRepository;
 import org.example.server.repos.RepoRepository;
 import org.example.server.repos.TokensRepository;
 import org.example.server.repos.UserRepoRepository;
 import org.example.server.repos.UserRepository;
+import org.example.server.integrations.CoderManagerClient;
 import org.example.server.integrations.RepTrackerClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,7 +24,6 @@ import java.nio.file.Paths;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
@@ -34,30 +33,36 @@ public class RepoService {
     private final RepoRepository repoRepository;
     private final UserRepoRepository userRepoRepository;
     private final FileRepository fileRepository;
-    private final EditorSessionRepository editorSessionRepository;
     private final StorageService storageService;
     private final TokensRepository tokensRepository;
     private final GitHubClientImpl gitHubClient;
     private final RepTrackerClient repTrackerClient;
+    private final CoderManagerClient coderManagerClient;
+    private final long editLinkTtlSeconds;
+    private final String minioBucket;
 
     public RepoService(UserRepository userRepository,
                        RepoRepository repoRepository,
                        UserRepoRepository userRepoRepository,
                        FileRepository fileRepository,
-                       EditorSessionRepository editorSessionRepository,
                        StorageService storageService,
                        TokensRepository tokensRepository,
                        GitHubClientImpl gitHubClient,
-                       RepTrackerClient repTrackerClient) {
+                       RepTrackerClient repTrackerClient,
+                       CoderManagerClient coderManagerClient,
+                       @org.springframework.beans.factory.annotation.Value("${coder.edit-link-ttl-seconds:3600}") long editLinkTtlSeconds,
+                       @org.springframework.beans.factory.annotation.Value("${minio.bucket}") String minioBucket) {
         this.userRepository = userRepository;
         this.repoRepository = repoRepository;
         this.userRepoRepository = userRepoRepository;
         this.fileRepository = fileRepository;
-        this.editorSessionRepository = editorSessionRepository;
         this.storageService = storageService;
         this.tokensRepository = tokensRepository;
         this.gitHubClient = gitHubClient;
         this.repTrackerClient = repTrackerClient;
+        this.coderManagerClient = coderManagerClient;
+        this.editLinkTtlSeconds = editLinkTtlSeconds;
+        this.minioBucket = minioBucket;
     }
 
     @Transactional
@@ -218,14 +223,16 @@ public class RepoService {
         Repo repo = requireUserRepo(user);
         File file = fileRepository.findByRepoAndPath(repo, request.path())
                 .orElseThrow(() -> new IllegalArgumentException("Файл не найден"));
-        String link = "https://editor.local/session/" + UUID.randomUUID();
-        var session = new org.example.server.model.entity.EditorSession();
-        session.setFile(file);
-        session.setSessionUrl(link);
-        session.setForUser(user);
-        session.setCreatedAt(OffsetDateTime.now());
-        session.setExpiresAt(OffsetDateTime.now().plusHours(1));
-        editorSessionRepository.save(session);
+        String storageKey = file.getStorageKey();
+        if (storageKey == null || storageKey.isBlank()) {
+            downloadAndCacheFile(user, repo, file.getPath(), file);
+            storageKey = file.getStorageKey();
+        }
+        if (storageKey == null || storageKey.isBlank()) {
+            throw new IllegalStateException("Не удалось получить ключ файла для редактирования");
+        }
+        String s3Key = storageKey.startsWith("s3://") ? storageKey : "s3://" + minioBucket + "/" + storageKey;
+        String link = coderManagerClient.createEditorSession(s3Key, file.getPath(), user.getChatId(), editLinkTtlSeconds);
         return new EditLinkResponse(link);
     }
 

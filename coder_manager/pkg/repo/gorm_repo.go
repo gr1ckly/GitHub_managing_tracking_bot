@@ -169,6 +169,20 @@ func (r *GormRepo) ListExpiredUnsavedSessions(ctx context.Context, now time.Time
 	return sessions, nil
 }
 
+func (r *GormRepo) ListActiveUnsavedSessions(ctx context.Context, now time.Time, limit int) ([]*dao.EditorSession, error) {
+	var sessions []*dao.EditorSession
+	query := r.db.WithContext(ctx).Preload("File").Preload("File.Repo").Preload("User").
+		Where("consumed_at IS NOT NULL AND saved_at IS NULL AND (expires_at IS NULL OR expires_at > ?)", now).
+		Order("consumed_at ASC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if err := query.Find(&sessions).Error; err != nil {
+		return nil, err
+	}
+	return sessions, nil
+}
+
 func (r *GormRepo) MarkSessionSaved(ctx context.Context, sessionID int64, savedAt time.Time, storageKey string) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&dao.EditorSession{}).
