@@ -24,14 +24,15 @@ func GetCheckCommitsFunc(batchSize int, repo repo.SchedulerRepo, tokenRepo repo.
 		offset := 0
 		var wg sync.WaitGroup
 		for offset < repoCount {
+			localOffset := offset
+			wg.Add(1)
 			go func() {
 				localCtx, cancel := context.WithCancel(ctx)
 				defer cancel()
-				wg.Add(1)
 				defer wg.Done()
-				currRepos, currErr := repo.GetTrackingRepos(localCtx, offset, batchSize)
+				currRepos, currErr := repo.GetTrackingRepos(localCtx, localOffset, batchSize)
 				if currErr != nil {
-					zap.S().Warnf("get tracking repos failed (offset - %v, limit - %v): %v", offset, batchSize, currErr)
+					zap.S().Warnf("get tracking repos failed (offset - %v, limit - %v): %v", localOffset, batchSize, currErr)
 				}
 				for _, currRepo := range currRepos {
 					token, currErr := tokenRepo.GetToken(localCtx, currRepo.User.ChatID)
@@ -109,9 +110,23 @@ func GetCheckCommitsFunc(batchSize int, repo repo.SchedulerRepo, tokenRepo repo.
 							zap.S().Warnf("save commits failed: %v", err)
 						}
 						for _, newCommit := range newCommits {
+							zap.L().Info("Sending notification to user", 
+								zap.String("chat_id", currRepo.User.ChatID),
+								zap.String("commit_url", newCommit.GetCommit().GetURL()),
+								zap.String("commit_sha", newCommit.GetCommit().GetSHA()),
+								zap.String("repo_url", currRepo.Repo.URL))
+							
 							currErr = writer.WriteNotification(ctx, currRepo.User.ChatID, dto.ConvertRepositoryCommitToDTO(newCommit))
-							if err != nil {
-								zap.S().Warnf("write notification about commit (%v %v) failed: %v", newCommit.GetCommit().GetURL(), newCommit.GetCommit().GetSHA(), err)
+							if currErr != nil {
+								zap.L().Error("Failed to send notification about commit", 
+									zap.String("commit_url", newCommit.GetCommit().GetURL()),
+									zap.String("commit_sha", newCommit.GetCommit().GetSHA()),
+									zap.String("chat_id", currRepo.User.ChatID),
+									zap.Error(currErr))
+							} else {
+								zap.L().Info("Successfully sent notification", 
+									zap.String("commit_url", newCommit.GetCommit().GetURL()),
+									zap.String("chat_id", currRepo.User.ChatID))
 							}
 						}
 					}

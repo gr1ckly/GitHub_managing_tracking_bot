@@ -28,4 +28,4 @@
             DROP TYPE IF EXISTS FILE_STATE;
         </rollback>
     </changeSet>
-    </databaseChangeLog>
+</databaseChangeLog>

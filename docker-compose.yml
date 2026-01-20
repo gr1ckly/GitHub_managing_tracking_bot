@@ -11,8 +11,8 @@ services:
       TRACK_BATCH_SIZE: "100"
       TRACK_INTERVAL_SEC: "60"
     depends_on:
-      postgres:
-        condition: service_healthy
+      - postgres
+      - kafka-init
 
   rep_tracker_server:
     container_name: rep-tracker-server
@@ -109,7 +109,17 @@ services:
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     depends_on: [zookeeper]
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.5.2
+    depends_on:
+      - kafka
+    volumes:
+      - ./scripts:/scripts
+    command: /scripts/create-topic.sh
 
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.2
@@ -146,6 +156,10 @@ services:
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
+      # Kafka configuration
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      REPTRACKER_KAFKA_TOPIC: rep_tracker_changes
+      BOT_NOTIFICATION_URL: http://localhost:8085/api/notify
       # Enable SQL logging
       SPRING_JPA_PROPERTIES_HIBERNATE_SHOW_SQL: "true"
       SPRING_JPA_PROPERTIES_HIBERNATE_FORMAT_SQL: "true"
@@ -158,6 +172,7 @@ services:
       LOGGING_PATTERN_CONSOLE: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
     depends_on:
       - liquibase
+      - kafka-init
     ports:
       - "8083:8081"
 

@@ -18,7 +18,6 @@ type User struct {
 
 	Tokens        []Token         `gorm:"foreignKey:UserID;references:ID;constraint:OnDelete:CASCADE"`
 	UserRepos     []UserRepo      `gorm:"foreignKey:UserID;references:ID;constraint:OnDelete:CASCADE"`
-	Commits       []Commit        `gorm:"foreignKey:AuthorID;references:ID;constraint:OnDelete:SET NULL"`
 	EditorSession []EditorSession `gorm:"foreignKey:ForUser;references:ID;constraint:OnDelete:SET NULL"`
 	Notifications []Notification  `gorm:"foreignKey:UserID;references:ID;constraint:OnDelete:CASCADE"`
 }
@@ -86,14 +85,13 @@ type Commit struct {
 	RepoID     int       `gorm:"column:repo_id;not null"`
 	BranchID   *int      `gorm:"column:branch_id"`
 	CommitHash *string   `gorm:"column:commit_hash"`
-	AuthorID   *int      `gorm:"column:author_id"`
+	AuthorName *string   `gorm:"column:author_name"` // Changed from AuthorID to AuthorName
 	Message    *string   `gorm:"column:message"`
 	Pushing    *bool     `gorm:"column:pushing"`
 	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime"`
 
 	Repo          Repo           `gorm:"foreignKey:RepoID;references:ID;constraint:OnDelete:CASCADE"`
 	Branch        *Branch        `gorm:"foreignKey:BranchID;references:ID;constraint:OnDelete:SET NULL"`
-	Author        *User          `gorm:"foreignKey:AuthorID;references:ID;constraint:OnDelete:SET NULL"`
 	CommitFiles   []CommitFile   `gorm:"foreignKey:CommitID;references:ID;constraint:OnDelete:CASCADE"`
 	Notifications []Notification `gorm:"foreignKey:LastCommit;references:ID;constraint:OnDelete:SET NULL"`
 }

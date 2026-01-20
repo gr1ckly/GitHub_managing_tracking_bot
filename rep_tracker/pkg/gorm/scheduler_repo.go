@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/go-github/github"
+	"go.uber.org/zap"
 	gormio "gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -71,20 +72,42 @@ func (r *GormSchedulerRepo) SaveCommitsAndUpdateNotification(ctx context.Context
 			}
 
 			commitTime := getCommitTime(c)
-			var authorID *int
+			var authorName *string
 			if login := getAuthorLogin(c); login != "" {
-				user, err := gormio.G[User](tx).
-					Where("username = ?", login).
-					First(ctx)
+				zap.L().Debug("Finding user for commit", 
+					zap.String("github_username", login),
+					zap.Int("repo_id", repo.ID))
+				
+				// Find user through notification relationship instead of GitHub username
+				var notification Notification
+				err := tx.Raw(`
+					SELECT notifications.* FROM notifications 
+					INNER JOIN users ON users.id = notifications.user_id 
+					WHERE notifications.repo_id = ? AND notifications.enabled = ? AND users.username = ? 
+					LIMIT 1`, repo.ID, true, login).Scan(&notification).Error
+				
 				if err == nil {
-					authorID = &user.ID
+					authorName = &login // Use GitHub username as author name
+					zap.L().Debug("Found user through notification", 
+						zap.String("github_username", login),
+						zap.Int("user_id", notification.UserID))
+				} else {
+					zap.L().Warn("User not found through notification", 
+						zap.String("github_username", login),
+						zap.Error(err))
+					authorName = &login // Still use GitHub username even if user not found
 				}
 			}
+
+			zap.L().Debug("Creating commit", 
+				zap.String("commit_hash", c.GetSHA()),
+				zap.Int("repo_id", repo.ID),
+				zap.Any("author_name", authorName))
 
 			newCommit := Commit{
 				RepoID:     repo.ID,
 				CommitHash: ptrString(c.GetSHA()),
-				AuthorID:   authorID,
+				AuthorName: authorName, // Use AuthorName instead of AuthorID
 				Message:    ptrString(c.GetCommit().GetMessage()),
 				Pushing:    ptrBool(false),
 				CreatedAt:  commitTime,
