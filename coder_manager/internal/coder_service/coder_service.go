@@ -25,8 +25,6 @@ import (
 )
 
 type CreateEditorSessionRequest struct {
-	Repo       string
-	Branch     string
 	Path       string
 	ChatID     string
 	TTLSeconds int64
@@ -76,15 +74,12 @@ func NewService(repo repo.CoderRepo, coderClient coder_client.CoderClient, stora
 func (s *Service) CreateEditorSession(ctx context.Context, req CreateEditorSessionRequest) (*CreateEditorSessionResponse, error) {
 	pathValue := strings.TrimSpace(req.Path)
 	chatID := strings.TrimSpace(req.ChatID)
-	hasS3 := strings.TrimSpace(req.S3Key) != ""
+	s3Key := strings.TrimSpace(req.S3Key)
 	if chatID == "" {
 		return nil, fmt.Errorf("%w: chat_id is required", ErrInvalidRequest)
 	}
-	if pathValue == "" && !hasS3 {
-		return nil, fmt.Errorf("%w: path is required", ErrInvalidRequest)
-	}
-	if strings.TrimSpace(req.Repo) == "" && !hasS3 {
-		return nil, fmt.Errorf("%w: repo or s3_key is required", ErrInvalidRequest)
+	if s3Key == "" {
+		return nil, fmt.Errorf("%w: s3_key is required", ErrInvalidRequest)
 	}
 	if req.TTLSeconds <= 0 {
 		return nil, fmt.Errorf("%w: ttl_seconds must be positive", ErrInvalidRequest)
@@ -98,50 +93,24 @@ func (s *Service) CreateEditorSession(ctx context.Context, req CreateEditorSessi
 		size       *int64
 		storageKey string
 	)
-	if strings.TrimSpace(req.S3Key) != "" {
-		var err error
-		storageKey, repoURL, err = normalizeS3Location(req.S3Key)
-		if err != nil {
-			zap.S().Errorw("parse s3 location failed", "s3_key", req.S3Key, "error", err)
-			return nil, fmt.Errorf("%w: %s", ErrInvalidRequest, err.Error())
-		}
-		if pathValue == "" {
-			pathValue = path.Base(storageKey)
-		}
-		if strings.TrimSpace(pathValue) == "" {
-			return nil, fmt.Errorf("%w: path is required", ErrInvalidRequest)
-		}
-		fileReader, size, err = s.storage.DownloadFile(ctx, file_storage.DownloadFileRequest{
-			Key: storageKey,
-		})
-		if err != nil {
-			zap.S().Errorw("s3 download failed", "key", storageKey, "error", err)
-			return nil, err
-		}
-	} else {
-		var err error
-		owner, name, repoURL, err = parseRepo(req.Repo)
-		if err != nil {
-			zap.S().Errorw("parse repo failed", "repo", req.Repo, "error", err)
-			return nil, fmt.Errorf("%w: %s", ErrInvalidRequest, err.Error())
-		}
-
-		token, err := s.repo.GetUserToken(ctx, req.ChatID)
-		if err != nil {
-			zap.S().Errorw("get user token failed", "chat_id", req.ChatID, "error", err)
-			return nil, err
-		}
-
-		if err := ensureRepoAccess(ctx, token, owner, name); err != nil {
-			zap.S().Errorw("repo access denied", "owner", owner, "repo", name, "error", err)
-			return nil, err
-		}
-
-		fileReader, size, err = downloadGitHubFile(ctx, token, owner, name, req.Branch, pathValue)
-		if err != nil {
-			zap.S().Errorw("github download failed", "repo", req.Repo, "path", req.Path, "error", err)
-			return nil, err
-		}
+	var err error
+	storageKey, repoURL, err = normalizeS3Location(s3Key)
+	if err != nil {
+		zap.S().Errorw("parse s3 location failed", "s3_key", req.S3Key, "error", err)
+		return nil, fmt.Errorf("%w: %s", ErrInvalidRequest, err.Error())
+	}
+	if pathValue == "" {
+		pathValue = path.Base(storageKey)
+	}
+	if strings.TrimSpace(pathValue) == "" {
+		return nil, fmt.Errorf("%w: path is required", ErrInvalidRequest)
+	}
+	fileReader, size, err = s.storage.DownloadFile(ctx, file_storage.DownloadFileRequest{
+		Key: storageKey,
+	})
+	if err != nil {
+		zap.S().Errorw("s3 download failed", "key", storageKey, "error", err)
+		return nil, err
 	}
 	defer fileReader.Close()
 
@@ -186,7 +155,7 @@ func (s *Service) CreateEditorSession(ctx context.Context, req CreateEditorSessi
 		RepoURL:      repoURL,
 		RepoOwner:    owner,
 		RepoName:     name,
-		Branch:       req.Branch,
+		Branch:       "",
 		Path:         pathValue,
 		StorageKey:   storageKey,
 		UserChatID:   chatID,
@@ -196,7 +165,7 @@ func (s *Service) CreateEditorSession(ctx context.Context, req CreateEditorSessi
 		OneTimeToken: oneTimeToken,
 	})
 	if err != nil {
-		zap.S().Errorw("create editor session failed", "repo", req.Repo, "path", req.Path, "error", err)
+		zap.S().Errorw("create editor session failed", "path", pathValue, "error", err)
 		return nil, err
 	}
 

@@ -8,9 +8,11 @@ import (
 	"rep_tracker/pkg/dto"
 	"rep_tracker/pkg/errs"
 	"rep_tracker/pkg/github"
+	"rep_tracker/pkg/gorm"
 	"sync"
 	"time"
 
+	gh "github.com/google/go-github/github"
 	"go.uber.org/zap"
 )
 
@@ -105,26 +107,31 @@ func GetCheckCommitsFunc(batchSize int, repo repo.SchedulerRepo, tokenRepo repo.
 					}
 					zap.S().Infof("get commits for repo - %v since (%v): %v", currRepo.Repo.URL, lastCommitTime, len(newCommits))
 					if len(newCommits) > 0 {
-						err = repo.SaveCommitsAndUpdateNotification(ctx, newCommits...)
+						filteredCommits := filterNewCommits(newCommits, currRepo.LastCommitEntity)
+						if len(filteredCommits) == 0 {
+							continue
+						}
+						err = repo.SaveCommitsAndUpdateNotification(ctx, filteredCommits...)
 						if err != nil {
 							zap.S().Warnf("save commits failed: %v", err)
+							continue
 						}
-						for _, newCommit := range newCommits {
-							zap.L().Info("Sending notification to user", 
+						for _, newCommit := range filteredCommits {
+							zap.L().Info("Sending notification to user",
 								zap.String("chat_id", currRepo.User.ChatID),
 								zap.String("commit_url", newCommit.GetCommit().GetURL()),
 								zap.String("commit_sha", newCommit.GetCommit().GetSHA()),
 								zap.String("repo_url", currRepo.Repo.URL))
-							
+
 							currErr = writer.WriteNotification(ctx, currRepo.User.ChatID, dto.ConvertRepositoryCommitToDTO(newCommit))
 							if currErr != nil {
-								zap.L().Error("Failed to send notification about commit", 
+								zap.L().Error("Failed to send notification about commit",
 									zap.String("commit_url", newCommit.GetCommit().GetURL()),
 									zap.String("commit_sha", newCommit.GetCommit().GetSHA()),
 									zap.String("chat_id", currRepo.User.ChatID),
 									zap.Error(currErr))
 							} else {
-								zap.L().Info("Successfully sent notification", 
+								zap.L().Info("Successfully sent notification",
 									zap.String("commit_url", newCommit.GetCommit().GetURL()),
 									zap.String("chat_id", currRepo.User.ChatID))
 							}
@@ -136,4 +143,25 @@ func GetCheckCommitsFunc(batchSize int, repo repo.SchedulerRepo, tokenRepo repo.
 		}
 		wg.Wait()
 	}
+}
+
+func filterNewCommits(commits []*gh.RepositoryCommit, lastCommit *gorm.Commit) []*gh.RepositoryCommit {
+	if len(commits) == 0 {
+		return nil
+	}
+	if lastCommit == nil || lastCommit.CommitHash == nil || *lastCommit.CommitHash == "" {
+		return commits
+	}
+	lastSHA := *lastCommit.CommitHash
+	filtered := make([]*gh.RepositoryCommit, 0, len(commits))
+	for _, commit := range commits {
+		if commit == nil || commit.GetSHA() == "" {
+			continue
+		}
+		if commit.GetSHA() == lastSHA {
+			break
+		}
+		filtered = append(filtered, commit)
+	}
+	return filtered
 }
