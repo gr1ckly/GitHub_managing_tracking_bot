@@ -2,14 +2,20 @@ package org.example.server.services;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.server.model.dto.KafkaNotificationMessage;
+import org.example.server.model.entity.User;
 import org.example.server.repos.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.support.KafkaHeaders;
+import org.springframework.messaging.handler.annotation.Header;
+import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+
+import java.util.List;
 
 @Service
 public class KafkaNotificationConsumer {
@@ -28,51 +34,54 @@ public class KafkaNotificationConsumer {
     }
 
     @KafkaListener(topics = "${reptracker.kafka.topic}", groupId = "rep-tracker-consumer")
-    public void consume(String payload) {
-        log.info("Received Kafka message: {}", payload);
+    public void consume(@Payload String payload, @Header(KafkaHeaders.RECEIVED_KEY) String key) {
+        log.info("Received Kafka message: key={}, payload={}", key, payload);
         try {
             KafkaNotificationMessage msg = objectMapper.readValue(payload, KafkaNotificationMessage.class);
             log.info("Получено уведомление от Kafka: link={}, author={}, title={}", 
                     msg.link(), msg.author(), msg.title());
             
-            // Find users who track this repository
-            String repoUrl = msg.link();
-            if (repoUrl != null) {
-                // Extract repo owner and name from URL to find in database
-                String[] parts = extractOwnerAndName(repoUrl);
-                if (parts != null) {
-                    String owner = parts[0];
-                    String name = parts[1];
-                    
-                    // Find users tracking this repository
-                    userRepository.findUsersByRepositoryUrl(repoUrl).forEach(user -> {
-                        try {
-                            String message = msg.getFormattedMessage();
-                            log.info("Отправка уведомления пользователю chatId={}: {}", user.getChatId(), message);
-                            
-                            // Send to bot
-                            BotNotificationRequest botRequest = new BotNotificationRequest(
-                                user.getChatId().toString(), 
-                                message
-                            );
-                            
-                            ResponseEntity<Void> response = restTemplate.postForEntity(
-                                botNotificationUrl, botRequest, Void.class);
-                            
-                            if (response.getStatusCode().is2xxSuccessful()) {
-                                log.info("Уведомление успешно отправлено пользователю chatId={}", user.getChatId());
-                            } else {
-                                log.warn("Не удалось отправить уведомление боту, статус: {}", response.getStatusCode());
-                            }
-                        } catch (Exception e) {
-                            log.info("Ошибка отправки уведомления пользователю chatId={}: {}",
-                                    user.getChatId(), e.getMessage(), e);
-                        }
-                    });
+            // Extract chatId from Kafka message key
+            Long chatId = Long.parseLong(key);
+            
+            try {
+                String message = msg.getFormattedMessage();
+                log.info("Отправка уведомления пользователю chatId={}: {}", chatId, message);
+                
+                // Send to bot
+                BotNotificationRequest botRequest = new BotNotificationRequest(
+                    chatId.toString(), 
+                    message
+                );
+                
+                ResponseEntity<Void> response = restTemplate.postForEntity(
+                    botNotificationUrl, botRequest, Void.class);
+                
+                if (response.getStatusCode().is2xxSuccessful()) {
+                    log.info("Уведомление успешно отправлено пользователю chatId={}", chatId);
+                } else {
+                    log.warn("Не удалось отправить уведомление боту, статус: {}", response.getStatusCode());
                 }
+            } catch (Exception e) {
+                log.info("Ошибка отправки уведомления пользователю chatId={}: {}",
+                        chatId, e.getMessage(), e);
             }
         } catch (Exception e) {
             log.info("Ошибка обработки Kafka сообщения: {}", e.getMessage(), e);
+        }
+    }
+    
+    private String extractRepositoryUrl(String commitUrl) {
+        try {
+            // Convert https://github.com/owner/repo/commit/sha to https://github.com/owner/repo
+            String[] parts = commitUrl.split("/");
+            if (parts.length >= 5 && parts[2].equals("github.com")) {
+                return parts[0] + "//" + parts[2] + "/" + parts[3] + "/" + parts[4];
+            }
+            return null;
+        } catch (Exception e) {
+            log.error("Error extracting repository URL from commit URL: {}", commitUrl, e);
+            return null;
         }
     }
     

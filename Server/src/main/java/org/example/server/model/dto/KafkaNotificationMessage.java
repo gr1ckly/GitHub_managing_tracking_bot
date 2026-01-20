@@ -1,12 +1,12 @@
 package org.example.server.model.dto;
 
-import java.time.Instant;
+import java.time.LocalDateTime;
 
 public record KafkaNotificationMessage(
     String link,
     String author, 
     String title,
-    Instant updated_at
+    String updated_at
 ) {
     
     public String getFormattedMessage() {

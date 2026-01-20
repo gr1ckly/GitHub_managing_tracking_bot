@@ -158,8 +158,14 @@ services:
       MINIO_SECRET_KEY: minioadmin
       # Kafka configuration
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SPRING_KAFKA_CONSUMER_BOOTSTRAP_SERVERS: kafka:9092
       REPTRACKER_KAFKA_TOPIC: rep_tracker_changes
-      BOT_NOTIFICATION_URL: http://localhost:8085/api/notify
+      BOT_NOTIFICATION_URL: http://client:8082/api/telegram/notify
+      # Kafka consumer configuration
+      SPRING_KAFKA_CONSUMER_GROUP_ID: rep-tracker-consumer
+      SPRING_KAFKA_CONSUMER_AUTO_OFFSET_RESET: earliest
+      SPRING_KAFKA_CONSUMER_KEY_DESERIALIZER: org.apache.kafka.common.serialization.StringDeserializer
+      SPRING_KAFKA_CONSUMER_VALUE_DESERIALIZER: org.apache.kafka.common.serialization.StringDeserializer
       # Enable SQL logging
       SPRING_JPA_PROPERTIES_HIBERNATE_SHOW_SQL: "true"
       SPRING_JPA_PROPERTIES_HIBERNATE_FORMAT_SQL: "true"
@@ -168,6 +174,9 @@ services:
       LOGGING_LEVEL_OR_SPRING_TRANSACTION: "DEBUG"
       LOGGING_LEVEL_OR_HIBERNATE_TRANSACTION: "DEBUG"
       LOGGING_LEVEL_OR_HIBERNATE_RESOURCE: "DEBUG"
+      # Kafka logging
+      LOGGING_LEVEL_OR_APACHE_KAFKA: "DEBUG"
+      LOGGING_LEVEL_ORG_SPRING_KAFKA: "DEBUG"
       # Pattern for detailed logging
       LOGGING_PATTERN_CONSOLE: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
     depends_on:
