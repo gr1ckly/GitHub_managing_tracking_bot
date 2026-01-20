@@ -28,12 +28,10 @@ func NewCoderManagerServer(service *coder_service.Service) *CoderManagerServer {
 
 func (s *CoderManagerServer) CreateEditorSession(ctx context.Context, req *proto.CreateEditorSessionRequest) (*proto.CreateEditorSessionResponse, error) {
 	response, err := s.service.CreateEditorSession(ctx, coder_service.CreateEditorSessionRequest{
-		Repo:       req.GetRepo(),
-		Branch:     req.GetBranch(),
+		S3Key:      req.GetS3Key(),
 		Path:       req.GetPath(),
 		ChatID:     req.GetChatId(),
 		TTLSeconds: req.GetTtlSeconds(),
-		S3Key:      req.GetS3Key(),
 	})
 	if err != nil {
 		zap.S().Errorw("create editor session failed", "error", err)

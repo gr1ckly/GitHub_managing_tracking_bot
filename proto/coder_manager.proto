@@ -7,12 +7,10 @@ option go_package = "coder_manager/pkg/proto;proto";
 import "google/protobuf/timestamp.proto";
 
 message CreateEditorSessionRequest {
-  string repo = 1;
-  string branch = 2;
-  string path = 3;
-  string chat_id = 4;
-  int64 ttl_seconds = 5;
-  string s3_key = 6;
+  string s3_key = 1;
+  string path = 2;
+  string chat_id = 3;
+  int64 ttl_seconds = 4;
 }
 
 message CreateEditorSessionResponse {

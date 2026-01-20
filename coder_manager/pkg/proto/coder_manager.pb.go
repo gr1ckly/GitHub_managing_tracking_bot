@@ -24,12 +24,10 @@ const (
 
 type CreateEditorSessionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Repo          string                 `protobuf:"bytes,1,opt,name=repo,proto3" json:"repo,omitempty"`
-	Branch        string                 `protobuf:"bytes,2,opt,name=branch,proto3" json:"branch,omitempty"`
-	Path          string                 `protobuf:"bytes,3,opt,name=path,proto3" json:"path,omitempty"`
-	ChatId        string                 `protobuf:"bytes,4,opt,name=chat_id,json=chatId,proto3" json:"chat_id,omitempty"`
-	TtlSeconds    int64                  `protobuf:"varint,5,opt,name=ttl_seconds,json=ttlSeconds,proto3" json:"ttl_seconds,omitempty"`
-	S3Key         string                 `protobuf:"bytes,6,opt,name=s3_key,json=s3Key,proto3" json:"s3_key,omitempty"`
+	S3Key         string                 `protobuf:"bytes,1,opt,name=s3_key,json=s3Key,proto3" json:"s3_key,omitempty"`
+	Path          string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
+	ChatId        string                 `protobuf:"bytes,3,opt,name=chat_id,json=chatId,proto3" json:"chat_id,omitempty"`
+	TtlSeconds    int64                  `protobuf:"varint,4,opt,name=ttl_seconds,json=ttlSeconds,proto3" json:"ttl_seconds,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -64,16 +62,9 @@ func (*CreateEditorSessionRequest) Descriptor() ([]byte, []int) {
 	return file_coder_manager_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *CreateEditorSessionRequest) GetRepo() string {
+func (x *CreateEditorSessionRequest) GetS3Key() string {
 	if x != nil {
-		return x.Repo
-	}
-	return ""
-}
-
-func (x *CreateEditorSessionRequest) GetBranch() string {
-	if x != nil {
-		return x.Branch
+		return x.S3Key
 	}
 	return ""
 }
@@ -97,13 +88,6 @@ func (x *CreateEditorSessionRequest) GetTtlSeconds() int64 {
 		return x.TtlSeconds
 	}
 	return 0
-}
-
-func (x *CreateEditorSessionRequest) GetS3Key() string {
-	if x != nil {
-		return x.S3Key
-	}
-	return ""
 }
 
 type CreateEditorSessionResponse struct {
@@ -266,15 +250,13 @@ var File_coder_manager_proto protoreflect.FileDescriptor
 
 const file_coder_manager_proto_rawDesc = "" +
 	"\n" +
-	"\x13coder_manager.proto\x12\rcoder_manager\x1a\x1fgoogle/protobuf/timestamp.proto\"\xad\x01\n" +
-	"\x1aCreateEditorSessionRequest\x12\x12\n" +
-	"\x04repo\x18\x01 \x01(\tR\x04repo\x12\x16\n" +
-	"\x06branch\x18\x02 \x01(\tR\x06branch\x12\x12\n" +
-	"\x04path\x18\x03 \x01(\tR\x04path\x12\x17\n" +
-	"\achat_id\x18\x04 \x01(\tR\x06chatId\x12\x1f\n" +
-	"\vttl_seconds\x18\x05 \x01(\x03R\n" +
-	"ttlSeconds\x12\x15\n" +
-	"\x06s3_key\x18\x06 \x01(\tR\x05s3Key\"\x99\x01\n" +
+	"\x13coder_manager.proto\x12\rcoder_manager\x1a\x1fgoogle/protobuf/timestamp.proto\"\x81\x01\n" +
+	"\x1aCreateEditorSessionRequest\x12\x15\n" +
+	"\x06s3_key\x18\x01 \x01(\tR\x05s3Key\x12\x12\n" +
+	"\x04path\x18\x02 \x01(\tR\x04path\x12\x17\n" +
+	"\achat_id\x18\x03 \x01(\tR\x06chatId\x12\x1f\n" +
+	"\vttl_seconds\x18\x04 \x01(\x03R\n" +
+	"ttlSeconds\"\x99\x01\n" +
 	"\x1bCreateEditorSessionResponse\x12 \n" +
 	"\fone_time_url\x18\x01 \x01(\tR\n" +
 	"oneTimeUrl\x12\x1d\n" +
