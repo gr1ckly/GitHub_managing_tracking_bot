@@ -101,11 +101,10 @@ func (c *SDKClient) CreateWorkspace(ctx context.Context, req internalclient.Crea
 	request := codersdk.CreateWorkspaceRequest{
 		Name: name,
 	}
-	if c.templateID != nil {
-		request.TemplateID = *c.templateID
-	}
 	if c.templateVersionID != nil {
 		request.TemplateVersionID = *c.templateVersionID
+	} else if c.templateID != nil {
+		request.TemplateID = *c.templateID
 	}
 	if c.templateVersionPresetID != nil {
 		request.TemplateVersionPresetID = *c.templateVersionPresetID

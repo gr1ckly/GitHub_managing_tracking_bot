@@ -74,10 +74,16 @@ func NewService(repo repo.CoderRepo, coderClient coder_client.CoderClient, stora
 }
 
 func (s *Service) CreateEditorSession(ctx context.Context, req CreateEditorSessionRequest) (*CreateEditorSessionResponse, error) {
-	if strings.TrimSpace(req.Path) == "" || strings.TrimSpace(req.ChatID) == "" {
-		return nil, fmt.Errorf("%w: path and chat_id are required", ErrInvalidRequest)
+	pathValue := strings.TrimSpace(req.Path)
+	chatID := strings.TrimSpace(req.ChatID)
+	hasS3 := strings.TrimSpace(req.S3Key) != ""
+	if chatID == "" {
+		return nil, fmt.Errorf("%w: chat_id is required", ErrInvalidRequest)
 	}
-	if strings.TrimSpace(req.Repo) == "" && strings.TrimSpace(req.S3Key) == "" {
+	if pathValue == "" && !hasS3 {
+		return nil, fmt.Errorf("%w: path is required", ErrInvalidRequest)
+	}
+	if strings.TrimSpace(req.Repo) == "" && !hasS3 {
 		return nil, fmt.Errorf("%w: repo or s3_key is required", ErrInvalidRequest)
 	}
 	if req.TTLSeconds <= 0 {
@@ -98,6 +104,12 @@ func (s *Service) CreateEditorSession(ctx context.Context, req CreateEditorSessi
 		if err != nil {
 			zap.S().Errorw("parse s3 location failed", "s3_key", req.S3Key, "error", err)
 			return nil, fmt.Errorf("%w: %s", ErrInvalidRequest, err.Error())
+		}
+		if pathValue == "" {
+			pathValue = path.Base(storageKey)
+		}
+		if strings.TrimSpace(pathValue) == "" {
+			return nil, fmt.Errorf("%w: path is required", ErrInvalidRequest)
 		}
 		fileReader, size, err = s.storage.DownloadFile(ctx, file_storage.DownloadFileRequest{
 			Key: storageKey,
@@ -125,7 +137,7 @@ func (s *Service) CreateEditorSession(ctx context.Context, req CreateEditorSessi
 			return nil, err
 		}
 
-		fileReader, size, err = downloadGitHubFile(ctx, token, owner, name, req.Branch, req.Path)
+		fileReader, size, err = downloadGitHubFile(ctx, token, owner, name, req.Branch, pathValue)
 		if err != nil {
 			zap.S().Errorw("github download failed", "repo", req.Repo, "path", req.Path, "error", err)
 			return nil, err
@@ -150,7 +162,7 @@ func (s *Service) CreateEditorSession(ctx context.Context, req CreateEditorSessi
 
 	if err := s.coderClient.UploadFile(ctx, coder_client.UploadFileRequest{
 		WorkspaceID: workspaceID,
-		Path:        req.Path,
+		Path:        pathValue,
 		Content:     fileReader,
 		Size:        sizeOrUnknown(size),
 	}); err != nil {
@@ -175,9 +187,9 @@ func (s *Service) CreateEditorSession(ctx context.Context, req CreateEditorSessi
 		RepoOwner:    owner,
 		RepoName:     name,
 		Branch:       req.Branch,
-		Path:         req.Path,
+		Path:         pathValue,
 		StorageKey:   storageKey,
-		UserChatID:   req.ChatID,
+		UserChatID:   chatID,
 		SessionURL:   editorURL,
 		WorkspaceID:  workspaceID,
 		ExpiresAt:    &expiresAt,
