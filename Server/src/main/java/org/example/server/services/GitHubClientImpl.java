@@ -128,4 +128,83 @@ public class GitHubClientImpl implements GitHubClient {
             throw e;
         }
     }
+
+    @Override
+    public void updateFile(String token, String owner, String repo, String path, String content, String message, String sha) throws Exception {
+        try {
+            Map<String, Object> requestBody = Map.of(
+                "message", message,
+                "content", Base64.getEncoder().encodeToString(content.getBytes()),
+                "sha", sha
+            );
+            
+            webClient.put()
+                    .uri("/repos/{owner}/{repo}/contents/{path}", owner, repo, path)
+                    .headers(h -> h.setBearerAuth(token))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(requestBody)
+                    .retrieve()
+                    .toBodilessEntity()
+                    .block();
+            
+            log.info("Файл {} успешно обновлен в репозитории {}/{}", path, owner, repo);
+            
+        } catch (WebClientResponseException e) {
+            if (e.getStatusCode() == HttpStatus.CONFLICT) {
+                log.warn("Конфликт при обновлении файла {}: {}", path, e.getMessage());
+                throw new Exception("CONFLICT: Файл был изменен другим пользователем. Пожалуйста, разрешите конфликты вручную.");
+            } else if (e.getStatusCode() == HttpStatus.NOT_FOUND) {
+                log.warn("Файл или репозиторий не найден: {}", path);
+                throw new Exception("NOT_FOUND: Файл или репозиторий не найден.");
+            } else {
+                log.error("Ошибка при обновлении файла {}: {}", path, e.getMessage());
+                throw new Exception("Ошибка GitHub API: " + e.getMessage());
+            }
+        } catch (Exception e) {
+            log.error("Неожиданная ошибка при обновлении файла {}: {}", path, e.getMessage());
+            throw e;
+        }
+    }
+
+    @Override
+    public String getFileSha(String token, String owner, String repo, String path, String branch) throws Exception {
+        try {
+            Object response = webClient.get()
+                    .uri("/repos/{owner}/{repo}/contents/{path}?ref={branch}", owner, repo, path, branch)
+                    .headers(h -> h.setBearerAuth(token))
+                    .retrieve()
+                    .bodyToMono(Object.class)
+                    .block();
+            
+            // GitHub API может вернуть как объект (файл) так и массив (директория)
+            if (response instanceof Map) {
+                Map responseMap = (Map) response;
+                if (responseMap.containsKey("sha")) {
+                    return (String) responseMap.get("sha");
+                }
+            } else if (response instanceof List) {
+                // Это директория - ищем файл с таким же именем в директории
+                List responseList = (List) response;
+                String fileName = path.substring(path.lastIndexOf('/') + 1);
+                for (Object item : responseList) {
+                    if (item instanceof Map) {
+                        Map itemMap = (Map) item;
+                        if (fileName.equals(itemMap.get("name"))) {
+                            return (String) itemMap.get("sha");
+                        }
+                    }
+                }
+            }
+            
+            // Файл не найден
+            return null;
+            
+        } catch (WebClientResponseException e) {
+            if (e.getStatusCode() == HttpStatus.NOT_FOUND) {
+                return null; // Файл не существует, можно создавать новый
+            }
+            log.error("Ошибка при получении SHA файла {}: {}", path, e.getMessage());
+            throw new Exception("Ошибка GitHub API: " + e.getMessage());
+        }
+    }
 }

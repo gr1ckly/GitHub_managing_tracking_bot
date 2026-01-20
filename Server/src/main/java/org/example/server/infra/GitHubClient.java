@@ -11,4 +11,6 @@ public interface GitHubClient {
     List<GitHubTreeItem> fetchRepoTree(String token, String owner, String repo, String branch);
     byte[] downloadFile(String token, String owner, String repo, String path, String branch);
     String resolveDefaultBranch(String token, String owner, String repo);
+    void updateFile(String token, String owner, String repo, String path, String content, String message, String sha) throws Exception;
+    String getFileSha(String token, String owner, String repo, String path, String branch) throws Exception;
 }

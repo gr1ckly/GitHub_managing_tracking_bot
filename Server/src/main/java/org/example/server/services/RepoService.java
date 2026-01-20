@@ -178,9 +178,14 @@ public class RepoService {
         } catch (IOException e) {
             throw new IllegalStateException("Не удалось прочитать файл", e);
         }
+        
+        log.info("Загрузка файла: chatId={}, repo={}, path={}, objectKey={}, size={} bytes", 
+                chatId, repo.getUrl(), cleanPath, objectKey, bytes.length);
+        
         // Сначала кладем в хранилище; если БД падает, удалим объект. Если MinIO недоступен — кидаем исключение, транзакция откатится.
         try {
             storageService.putObject(objectKey, bytes, multipartFile.getContentType());
+            log.info("Файл успешно сохранен в MinIO: {}", objectKey);
         } catch (RuntimeException ex) {
             log.warn("Не удалось сохранить объект {} в хранилище: {}", objectKey, ex.getMessage());
             throw new IllegalStateException("Не удалось сохранить файл в хранилище", ex);
@@ -194,6 +199,7 @@ public class RepoService {
             fileEntity.setCreatedAt(Optional.ofNullable(fileEntity.getCreatedAt()).orElse(OffsetDateTime.now()));
             fileEntity.setUpdatedAt(OffsetDateTime.now());
             fileRepository.save(fileEntity);
+            log.info("Файл успешно сохранен в БД: path={}, storageKey={}", cleanPath, objectKey);
         } catch (RuntimeException ex) {
             // Откат в хранилище, если БД не сохранилась
             try {
@@ -258,9 +264,94 @@ public class RepoService {
     public String pushRepository(PushRepositoryRequest request) {
         User user = requireUser(request.chatId());
         Repo repo = requireUserRepo(user);
-        // Заглушка под будущее подключение к Git: здесь можно триггерить фоновые задачи push
+        
         log.info("Запрос push от chatId {} для репо {}", user.getChatId(), repo.getUrl());
-        return "Запрос на push принят";
+        
+        try {
+            // Получаем токен пользователя
+            String token = tokensRepository.findByUser(user)
+                    .map(Token::getToken)
+                    .orElseThrow(() -> new IllegalStateException("Нет сохраненного токена пользователя"));
+            
+            // Определяем ветку
+            String branch = gitHubClient.resolveDefaultBranch(token, repo.getOwner(), repo.getName());
+            
+            // Получаем только файлы, которые есть локально в MinIO
+            List<File> userFiles = fileRepository.findByRepo(repo).stream()
+                    .filter(file -> file.getStorageKey() != null) // Только файлы в MinIO
+                    .collect(Collectors.toList());
+            
+            log.info("Найдено {} файлов в MinIO для репозитория {}", userFiles.size(), repo.getUrl());
+            userFiles.forEach(file -> log.info("Файл в MinIO: {} (storageKey: {})", file.getPath(), file.getStorageKey()));
+            
+            if (userFiles.isEmpty()) {
+                return "Нет файлов для отправки в репозиторий";
+            }
+            
+            int successCount = 0;
+            int conflictCount = 0;
+            StringBuilder result = new StringBuilder();
+            
+            for (File file : userFiles) {
+                try {
+                    // Получаем контент файла
+                    byte[] contentBytes;
+                    if (file.getStorageKey() != null) {
+                        contentBytes = storageService.getObjectBytes(file.getStorageKey());
+                    } else {
+                        contentBytes = downloadAndCacheFile(user, repo, file.getPath(), file);
+                    }
+                    String content = new String(contentBytes);
+                    
+                    // Получаем текущий SHA файла
+                    String currentSha = gitHubClient.getFileSha(token, repo.getOwner(), repo.getName(), file.getPath(), branch);
+                    
+                    // Если файл не существует в GitHub, создаем его
+                    if (currentSha == null) {
+                        gitHubClient.updateFile(token, repo.getOwner(), repo.getName(), 
+                                file.getPath(), content, "Add " + file.getPath(), null);
+                        log.info("Создан новый файл: {}", file.getPath());
+                        successCount++;
+                    } else {
+                        // Обновляем существующий файл
+                        gitHubClient.updateFile(token, repo.getOwner(), repo.getName(), 
+                                file.getPath(), content, "Update " + file.getPath(), currentSha);
+                        log.info("Обновлен файл: {}", file.getPath());
+                        successCount++;
+                    }
+                    
+                } catch (Exception e) {
+                    if (e.getMessage() != null && e.getMessage().startsWith("CONFLICT:")) {
+                        log.warn("Конфликт при обновлении файла {}: {}", file.getPath(), e.getMessage());
+                        conflictCount++;
+                        result.append("❌ ").append(file.getPath())
+                              .append(": ").append(e.getMessage()).append("\n");
+                    } else {
+                        log.error("Ошибка при обработке файла {}: {}", file.getPath(), e.getMessage());
+                        result.append("⚠️ ").append(file.getPath())
+                              .append(": ").append(e.getMessage()).append("\n");
+                    }
+                }
+            }
+            
+            // Формируем результат
+            if (successCount > 0 && conflictCount == 0) {
+                result.insert(0, "✅ Успешно отправлено файлов: ").insert(0, successCount).append("\n");
+            } else if (conflictCount > 0) {
+                result.insert(0, "⚠️ Обнаружено конфликтов: ").insert(0, conflictCount).append("\n");
+                result.append("\n💡 Пожалуйста, разрешите конфликты вручную и повторите попытку.");
+            }
+            
+            if (successCount == 0 && conflictCount == 0) {
+                return "Нет файлов для отправки или произошла ошибка";
+            }
+            
+            return result.toString().trim();
+            
+        } catch (Exception e) {
+            log.error("Ошибка при push репозитория: {}", e.getMessage(), e);
+            return "Ошибка: " + e.getMessage();
+        }
     }
 
     @Transactional(readOnly = true)
